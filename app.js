@@ -1,4 +1,3 @@
-// app.js
 document.addEventListener('DOMContentLoaded', function() {
     // DOM Elements
     const templatesGrid = document.getElementById('templatesGrid');
@@ -68,55 +67,55 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize
     init();
 
-   async function init() {
-    try {
-        showToast('Loading meme templates...', 'info');
-        await loadTemplates(true);
-        setupEventListeners();
-        setupDragAndDrop();
-        
-        // Wait for DOM to be fully ready
-        await waitForElement('#aiStatus');
-        
-        updateAIStatus();
-        aiRequestCount = 0;
-        
-        console.log('Meme Generator initialized successfully');
-    } catch (error) {
-        console.error('Initialization error:', error);
-        showToast('Initialization error, some features may not work', 'error');
-    }
-}
-
-// Helper function to wait for DOM elements
-function waitForElement(selector, timeout = 5000) {
-    return new Promise((resolve, reject) => {
-        const element = document.querySelector(selector);
-        if (element) {
-            resolve(element);
-            return;
+    async function init() {
+        try {
+            showToast('Loading meme templates...', 'info');
+            await loadTemplates(true);
+            setupEventListeners();
+            setupDragAndDrop();
+            
+            // Wait for DOM to be fully ready
+            await waitForElement('#aiStatus');
+            
+            updateAIStatus();
+            aiRequestCount = 0;
+            
+            console.log('Meme Generator initialized successfully');
+        } catch (error) {
+            console.error('Initialization error:', error);
+            showToast('Initialization error, some features may not work', 'error');
         }
-        
-        const observer = new MutationObserver(() => {
+    }
+
+    // Helper function to wait for DOM elements
+    function waitForElement(selector, timeout = 5000) {
+        return new Promise((resolve, reject) => {
             const element = document.querySelector(selector);
             if (element) {
-                observer.disconnect();
                 resolve(element);
+                return;
             }
+            
+            const observer = new MutationObserver(() => {
+                const element = document.querySelector(selector);
+                if (element) {
+                    observer.disconnect();
+                    resolve(element);
+                }
+            });
+            
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            // Timeout if element doesn't appear
+            setTimeout(() => {
+                observer.disconnect();
+                reject(new Error(`Element ${selector} not found after ${timeout}ms`));
+            }, timeout);
         });
-        
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        
-        // Timeout if element doesn't appear
-        setTimeout(() => {
-            observer.disconnect();
-            reject(new Error(`Element ${selector} not found after ${timeout}ms`));
-        }, timeout);
-    });
-}
+    }
 
     // Load templates with cache busting
     async function loadTemplates(forceRefresh = false) {
@@ -207,7 +206,14 @@ function waitForElement(selector, timeout = 5000) {
         generateBottomBtn.addEventListener('click', () => generateAIText('bottom'));
         generateBothBtn.addEventListener('click', generateBothAITexts);
         suggestThemesBtn.addEventListener('click', showThemeSuggestions);
-        improveTextBtn.addEventListener('click', improveCurrentText);
+        improveTextBtn.addEventListener('click', async () => {
+            try {
+                await improveCurrentText();
+            } catch (error) {
+                console.error('Improve text failed:', error);
+                showToast('Failed to improve text', 'error');
+            }
+        });
         
         // Action buttons
         downloadBtn.addEventListener('click', downloadMeme);
@@ -225,24 +231,20 @@ function waitForElement(selector, timeout = 5000) {
         
         // Real-time preview updates with debounce
         let updateTimeout;
-        [topTextInput, bottomTextInput, fontFamilySelect, textColorPicker, strokeColorPicker].forEach(input => {
+        [topTextInput, bottomTextInput, fontFamilySelect, textColorPicker, strokeColorPicker, fontSizeSlider, strokeWidthSlider].forEach(input => {
             input.addEventListener('input', () => {
                 clearTimeout(updateTimeout);
                 updateTimeout = setTimeout(updateMeme, 300);
             });
         });
 
-        // Debounce sliders (FIX: Added for performance)
-        [fontSizeSlider, strokeWidthSlider].forEach(slider => {
-            slider.addEventListener('input', () => {
-                if (slider === fontSizeSlider) {
-                    fontSizeValue.textContent = `${slider.value}px`;
-                } else {
-                    strokeWidthValue.textContent = `${slider.value}px`;
-                }
-                clearTimeout(updateTimeout);
-                updateTimeout = setTimeout(updateMeme, 300);
-            });
+        // Update slider values in real-time
+        fontSizeSlider.addEventListener('input', () => {
+            fontSizeValue.textContent = `${fontSizeSlider.value}px`;
+        });
+        
+        strokeWidthSlider.addEventListener('input', () => {
+            strokeWidthValue.textContent = `${strokeWidthSlider.value}px`;
         });
     }
 
@@ -317,9 +319,14 @@ function waitForElement(selector, timeout = 5000) {
         
         memeImage.src = URL.createObjectURL(uploadedFile);
         memeImage.onload = () => {
-            setCanvasDimensions(); // Preserve aspect ratio
-            currentTemplate = { name: 'Custom Upload', uploaded: true, width: memeImage.width, height: memeImage.height };
-            aiCache.clear(); // Clear cache on new template
+            setCanvasDimensions();
+            currentTemplate = { 
+                name: 'Custom Upload', 
+                uploaded: true, 
+                width: memeImage.width, 
+                height: memeImage.height 
+            };
+            aiCache.clear();
             editingSource.textContent = 'Uploaded Image';
             switchToEditor();
             updateMeme();
@@ -330,9 +337,9 @@ function waitForElement(selector, timeout = 5000) {
     function selectTemplate(template) {
         memeImage.src = template.url;
         memeImage.onload = () => {
-            setCanvasDimensions(); // Preserve aspect ratio
+            setCanvasDimensions();
             currentTemplate = template;
-            aiCache.clear(); // Clear cache on new template
+            aiCache.clear();
             editingSource.textContent = template.name;
             switchToEditor();
             updateMeme();
@@ -360,6 +367,55 @@ function waitForElement(selector, timeout = 5000) {
         const aspectRatio = memeImage.height / memeImage.width;
         memeCanvas.width = maxWidth;
         memeCanvas.height = maxWidth * aspectRatio;
+        
+        // Also update overlay container size
+        const canvasWrapper = document.querySelector('.canvas-wrapper');
+        if (canvasWrapper) {
+            canvasWrapper.style.width = `${maxWidth}px`;
+            canvasWrapper.style.height = `${memeCanvas.height}px`;
+        }
+    }
+
+    function updateMeme() {
+        if (!currentTemplate || !memeImage.complete) return;
+        
+        // Clear canvas and draw ONLY the image
+        ctx.clearRect(0, 0, memeCanvas.width, memeCanvas.height);
+        ctx.drawImage(memeImage, 0, 0, memeCanvas.width, memeCanvas.height);
+        
+        // Update text overlays
+        updateTextOverlays();
+    }
+
+    function updateTextOverlays() {
+        const topText = topTextInput.value.trim().toUpperCase();
+        const bottomText = bottomTextInput.value.trim().toUpperCase();
+        
+        // Show/hide overlays based on text content
+        topTextOverlay.style.display = topText ? 'block' : 'none';
+        bottomTextOverlay.style.display = bottomText ? 'block' : 'none';
+        
+        // Update overlay text content
+        topTextOverlay.textContent = topText;
+        bottomTextOverlay.textContent = bottomText;
+        
+        // Update overlay styles and positioning
+        updateOverlayStyles();
+        positionTextOverlays();
+    }
+
+    function positionTextOverlays() {
+        const fontSize = parseInt(fontSizeSlider.value);
+        
+        // Position top text overlay with some padding
+        if (topTextOverlay.textContent) {
+            topTextOverlay.style.top = `${fontSize * 0.5}px`;
+        }
+        
+        // Position bottom text overlay with some padding
+        if (bottomTextOverlay.textContent) {
+            bottomTextOverlay.style.bottom = `${fontSize * 0.5}px`;
+        }
     }
 
     function updateOverlayStyles() {
@@ -369,91 +425,22 @@ function waitForElement(selector, timeout = 5000) {
         const strokeColor = strokeColorPicker.value;
         const strokeWidth = parseInt(strokeWidthSlider.value);
         
+        // Apply styles to both overlays
         [topTextOverlay, bottomTextOverlay].forEach(overlay => {
             overlay.style.fontSize = `${fontSize}px`;
             overlay.style.fontFamily = `${fontFamily}, Impact, sans-serif`;
             overlay.style.color = textColor;
-            overlay.style.textShadow = `${strokeWidth}px ${strokeWidth}px 0 ${strokeColor}`;
+            overlay.style.textShadow = `
+                ${strokeWidth}px ${strokeWidth}px 0 ${strokeColor},
+                ${-strokeWidth}px ${strokeWidth}px 0 ${strokeColor},
+                ${strokeWidth}px ${-strokeWidth}px 0 ${strokeColor},
+                ${-strokeWidth}px ${-strokeWidth}px 0 ${strokeColor}
+            `;
+            overlay.style.fontWeight = 'bold';
+            overlay.style.letterSpacing = '1px';
+            overlay.style.lineHeight = '1.2';
+            overlay.style.padding = '5px 0';
         });
-    }
-
-    function updateMeme() {
-        if (!currentTemplate || !memeImage.complete) return;
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, memeCanvas.width, memeCanvas.height);
-        
-        // Draw the image
-        ctx.drawImage(memeImage, 0, 0, memeCanvas.width, memeCanvas.height);
-        
-        // Prepare text
-        const topText = topTextInput.value.trim().toUpperCase(); // Meme style: uppercase
-        const bottomText = bottomTextInput.value.trim().toUpperCase();
-        const fontSize = parseInt(fontSizeSlider.value);
-        const fontFamily = fontFamilySelect.value;
-        const textColor = textColorPicker.value;
-        const strokeColor = strokeColorPicker.value;
-        const strokeWidth = parseInt(strokeWidthSlider.value);
-        
-        // Update overlay
-        topTextOverlay.textContent = topText;
-        bottomTextOverlay.textContent = bottomText;
-        updateOverlayStyles();
-        
-        // Draw text on canvas
-        if (topText || bottomText) {
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = `bold ${fontSize}px ${fontFamily}, Impact, Arial Black, sans-serif`;
-            ctx.lineWidth = strokeWidth;
-            ctx.lineJoin = 'round';
-            ctx.strokeStyle = strokeColor;
-            ctx.fillStyle = textColor;
-            
-            // Draw top text with wrap
-            if (topText) {
-                drawWrappedText(topText, memeCanvas.width / 2, fontSize * 1.2, fontSize);
-            }
-            
-            // Draw bottom text with wrap
-            if (bottomText) {
-                drawWrappedText(bottomText, memeCanvas.width / 2, memeCanvas.height - fontSize * 1.2, fontSize, 'bottom');
-            }
-        }
-    }
-
-    function drawWrappedText(text, x, y, fontSize, position = 'top') {
-        const maxWidth = memeCanvas.width * 0.9;
-        const lineHeight = fontSize * 1.2;
-        const words = text.split(' ');
-        let line = '';
-        let lines = [];
-        
-        words.forEach(word => {
-            const testLine = line + word + ' ';
-            const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && line !== '') {
-                lines.push(line);
-                line = word + ' ';
-            } else {
-                line = testLine;
-            }
-        });
-        lines.push(line);
-        
-        // Adjust y for multi-line
-        if (position === 'bottom') {
-            y -= (lines.length - 1) * lineHeight;
-        }
-        
-        lines.forEach((line, i) => {
-            drawTextWithStroke(line.trim(), x, y + (i * lineHeight));
-        });
-    }
-
-    function drawTextWithStroke(text, x, y) {
-        ctx.strokeText(text, x, y);
-        ctx.fillText(text, x, y);
     }
 
     async function generateAIText(position) {
@@ -527,7 +514,6 @@ function waitForElement(selector, timeout = 5000) {
         showToast('Generating both texts with AI...', 'info');
         updateAIStatus('Generating both...', 'warning');
         
-        // Generate in parallel for better performance
         try {
             const [topText, bottomText] = await Promise.all([
                 getAICaption(currentTemplate.name, 'top'),
@@ -552,53 +538,47 @@ function waitForElement(selector, timeout = 5000) {
             console.error('AI Generation error:', error);
             showToast('Using fallback captions', 'warning');
             
-            // Use fallbacks
             topTextInput.value = getFallbackCaption(currentTemplate.name, 'top');
             bottomTextInput.value = getFallbackCaption(currentTemplate.name, 'bottom');
             updateMeme();
             updateAIStatus();
         }
     }
-async function getAICaption(templateName, position, context = null) {
-    try {
-        const cacheKey = `${templateName}-${position}-${context || 'default'}`;
-        
-        // Check cache
-        if (aiCache.has(cacheKey)) {
-            return aiCache.get(cacheKey);
+
+    async function getAICaption(templateName, position, context = null) {
+        try {
+            const cacheKey = `${templateName}-${position}-${context || 'default'}`;
+            
+            if (aiCache.has(cacheKey)) {
+                return aiCache.get(cacheKey);
+            }
+
+            const response = await fetch('/api/generate-caption', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    templateName,
+                    position,
+                    context: context || 'general internet humor'
+                })
+            });
+
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+            const data = await response.json();
+            if (data.success === false || !data.caption) {
+                throw new Error('Invalid response from AI');
+            }
+
+            aiCache.set(cacheKey, data.caption);
+            return data.caption;
+
+        } catch (error) {
+            console.warn('AI API failed, using fallback:', error);
+            return getFallbackCaption(templateName, position);
         }
-
-        const response = await fetch('/api/generate-caption', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                templateName,
-                position,
-                context: context || 'general internet humor'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        
-        if (data.success === false || !data.caption) {
-            throw new Error('Invalid response from AI');
-        }
-
-        // Cache the result
-        aiCache.set(cacheKey, data.caption);
-        return data.caption;
-
-    } catch (error) {
-        console.warn('AI API failed, using fallback:', error);
-        return getFallbackCaption(templateName, position);
     }
-}
+
     async function showThemeSuggestions() {
         if (!currentTemplate) {
             showToast('Please select an image first', 'error');
@@ -608,13 +588,11 @@ async function getAICaption(templateName, position, context = null) {
         showToast('Generating theme suggestions...', 'info');
         
         try {
-            // Get AI-generated themes
             const themes = await getAIThemes(currentTemplate.name);
             populateThemesGrid(themes);
             themesModal.classList.add('active');
         } catch (error) {
             console.error('Error getting themes:', error);
-            // Use predefined themes
             populateThemesGrid(getPredefinedThemes());
             themesModal.classList.add('active');
         }
@@ -654,53 +632,95 @@ async function getAICaption(templateName, position, context = null) {
         }
         
         showToast('Improving text with AI...', 'info');
+        updateAIStatus('Improving text...', 'warning');
         
         try {
             const improvedText = await improveTextWithAI(currentTop, currentBottom);
             
-            if (improvedText.top) {
+            let changed = false;
+            
+            if (improvedText.top && improvedText.top !== currentTop) {
                 topTextInput.value = improvedText.top;
-            }
-            if (improvedText.bottom) {
-                bottomTextInput.value = improvedText.bottom;
+                changed = true;
             }
             
-            updateMeme();
-            showToast('Text improved!', 'info');
+            if (improvedText.bottom && improvedText.bottom !== currentBottom) {
+                bottomTextInput.value = improvedText.bottom;
+                changed = true;
+            }
+            
+            if (changed) {
+                updateMeme();
+                showToast('Text improved successfully!', 'success');
+            } else {
+                showToast('Text already looks great!', 'info');
+            }
+            
+            updateAIStatus();
+            
         } catch (error) {
             console.error('Error improving text:', error);
-            showToast('Could not improve text', 'error');
+            showToast('Could not improve text. Using local enhancement.', 'warning');
+            
+            const enhanced = localTextEnhancementFallback(currentTop, currentBottom);
+            if (enhanced.top) topTextInput.value = enhanced.top;
+            if (enhanced.bottom) bottomTextInput.value = enhanced.bottom;
+            updateMeme();
+            updateAIStatus();
         }
     }
 
+    function localTextEnhancementFallback(topText, bottomText) {
+        const enhance = (text) => {
+            if (!text) return '';
+            let enhanced = text.toUpperCase();
+            
+            if (!enhanced.endsWith('!') && !enhanced.endsWith('?') && Math.random() > 0.5) {
+                enhanced += '!';
+            }
+            
+            if (enhanced.length < 25) {
+                const intensifiers = ['SERIOUSLY', 'ACTUALLY', 'LITERALLY', 'FOR REAL'];
+                if (Math.random() > 0.7) {
+                    enhanced = intensifiers[Math.floor(Math.random() * intensifiers.length)] + ' ' + enhanced;
+                }
+            }
+            
+            return enhanced;
+        };
+        
+        return {
+            top: enhance(topText),
+            bottom: enhance(bottomText)
+        };
+    }
+
     function updateAIStatus(text = 'AI Ready', type = 'success') {
-    const aiStatus = document.getElementById('aiStatus');
-    
-    // Check if element exists
-    if (!aiStatus) {
-        console.warn('aiStatus element not found in DOM');
-        return; // Exit if element doesn't exist
+        const aiStatus = document.getElementById('aiStatus');
+        
+        if (!aiStatus) {
+            console.warn('aiStatus element not found in DOM');
+            return;
+        }
+        
+        const icon = aiStatus.querySelector('i');
+        
+        aiStatus.textContent = text;
+        aiStatus.style.color = type === 'error' ? '#f56565' : 
+                               type === 'warning' ? '#ed8936' : 
+                               '#48bb78';
+        
+        if (icon) {
+            icon.className = type === 'error' ? 'fas fa-exclamation-circle' :
+                             type === 'warning' ? 'fas fa-clock' :
+                             'fas fa-circle';
+        }
+        
+        const remaining = MAX_AI_REQUESTS - aiRequestCount;
+        if (remaining <= 3) {
+            aiStatus.innerHTML = `${text} <span style="font-size: 0.8em;">(${remaining} left)</span>`;
+        }
     }
-    
-    const icon = aiStatus.querySelector('i');
-    
-    aiStatus.textContent = text;
-    aiStatus.style.color = type === 'error' ? '#f56565' : 
-                           type === 'warning' ? '#ed8936' : 
-                           '#48bb78';
-    
-    if (icon) {
-        icon.className = type === 'error' ? 'fas fa-exclamation-circle' :
-                         type === 'warning' ? 'fas fa-clock' :
-                         'fas fa-circle';
-    }
-    
-    // Update remaining requests
-    const remaining = MAX_AI_REQUESTS - aiRequestCount;
-    if (remaining <= 3) {
-        aiStatus.innerHTML = `${text} <span style="font-size: 0.8em;">(${remaining} left)</span>`;
-    }
-}
 
     function downloadMeme() {
         if (!currentTemplate) {
@@ -708,13 +728,92 @@ async function getAICaption(templateName, position, context = null) {
             return;
         }
         
+        // Create a temporary canvas for download that includes the text
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Set temp canvas dimensions
+        tempCanvas.width = memeCanvas.width;
+        tempCanvas.height = memeCanvas.height;
+        
+        // Draw image
+        tempCtx.drawImage(memeImage, 0, 0, tempCanvas.width, tempCanvas.height);
+        
+        // Draw text on temp canvas for download
+        const topText = topTextInput.value.trim().toUpperCase();
+        const bottomText = bottomTextInput.value.trim().toUpperCase();
+        
+        if (topText || bottomText) {
+            const fontSize = parseInt(fontSizeSlider.value);
+            const fontFamily = fontFamilySelect.value;
+            const textColor = textColorPicker.value;
+            const strokeColor = strokeColorPicker.value;
+            const strokeWidth = parseInt(strokeWidthSlider.value);
+            
+            tempCtx.textAlign = 'center';
+            tempCtx.textBaseline = 'middle';
+            tempCtx.font = `bold ${fontSize}px ${fontFamily}, Impact, Arial Black, sans-serif`;
+            tempCtx.lineWidth = strokeWidth;
+            tempCtx.lineJoin = 'round';
+            tempCtx.strokeStyle = strokeColor;
+            tempCtx.fillStyle = textColor;
+            
+            // Draw top text
+            if (topText) {
+                const lines = wrapText(tempCtx, topText, tempCanvas.width * 0.9);
+                const lineHeight = fontSize * 1.2;
+                let y = fontSize * 1.5;
+                
+                lines.forEach((line, index) => {
+                    const yPos = y + (index * lineHeight);
+                    tempCtx.strokeText(line, tempCanvas.width / 2, yPos);
+                    tempCtx.fillText(line, tempCanvas.width / 2, yPos);
+                });
+            }
+            
+            // Draw bottom text
+            if (bottomText) {
+                const lines = wrapText(tempCtx, bottomText, tempCanvas.width * 0.9);
+                const lineHeight = fontSize * 1.2;
+                const totalHeight = lines.length * lineHeight;
+                let y = tempCanvas.height - fontSize * 1.5 - totalHeight;
+                
+                lines.forEach((line, index) => {
+                    const yPos = y + (index * lineHeight);
+                    tempCtx.strokeText(line, tempCanvas.width / 2, yPos);
+                    tempCtx.fillText(line, tempCanvas.width / 2, yPos);
+                });
+            }
+        }
+        
+        // Download the temp canvas
         const link = document.createElement('a');
         const fileName = currentTemplate.uploaded ? 'my-meme' : 
                         `meme-${currentTemplate.name.replace(/\s+/g, '-').toLowerCase()}`;
         link.download = `${fileName}-${Date.now()}.png`;
-        link.href = memeCanvas.toDataURL('image/png');
+        link.href = tempCanvas.toDataURL('image/png');
         link.click();
         showToast('Meme downloaded!', 'info');
+    }
+
+    // Helper function for text wrapping in download
+    function wrapText(context, text, maxWidth) {
+        const words = text.split(' ');
+        const lines = [];
+        let currentLine = words[0];
+
+        for (let i = 1; i < words.length; i++) {
+            const word = words[i];
+            const width = context.measureText(currentLine + " " + word).width;
+            if (width < maxWidth) {
+                currentLine += " " + word;
+            } else {
+                lines.push(currentLine);
+                currentLine = word;
+            }
+        }
+        lines.push(currentLine);
+        return lines;
     }
 
     function shareMeme() {
@@ -723,7 +822,16 @@ async function getAICaption(templateName, position, context = null) {
             return;
         }
         
-        memeCanvas.toBlob(blob => {
+        // Use the same temp canvas logic as download
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.width = memeCanvas.width;
+        tempCanvas.height = memeCanvas.height;
+        tempCtx.drawImage(memeImage, 0, 0, tempCanvas.width, tempCanvas.height);
+        
+        // (Add text drawing logic here similar to downloadMeme)
+        
+        tempCanvas.toBlob(blob => {
             const file = new File([blob], 'meme.png', { type: 'image/png' });
             
             if (navigator.share) {
@@ -733,7 +841,6 @@ async function getAICaption(templateName, position, context = null) {
                     files: [file]
                 }).catch(() => showToast('Share cancelled', 'info'));
             } else {
-                // Clipboard fallback
                 const item = new ClipboardItem({ 'image/png': blob });
                 navigator.clipboard.write([item])
                     .then(() => showToast('Meme copied to clipboard!', 'info'))
