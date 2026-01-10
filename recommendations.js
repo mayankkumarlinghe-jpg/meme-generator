@@ -350,7 +350,127 @@ async function getAIThemes(templateName) {
 }
 
 async function improveTextWithAI(topText, bottomText) {
-    return await aiGenerator.improveTextWithAI(topText, bottomText);
+    // First, check if we have meaningful text to improve
+    if ((!topText || topText.trim() === '') && (!bottomText || bottomText.trim() === '')) {
+        return { top: topText, bottom: bottomText };
+    }
+    
+    try {
+        // Try to get AI improvement first
+        const response = await fetch('/api/improve-text', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                topText,
+                bottomText,
+                context: 'meme humor'
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.improvedTop || data.improvedBottom) {
+                return {
+                    top: data.improvedTop || topText,
+                    bottom: data.improvedBottom || bottomText
+                };
+            }
+        }
+    } catch (error) {
+        console.warn('AI improvement failed, using local enhancement:', error);
+    }
+    
+    // Fallback: Use local text enhancement
+    return localTextEnhancement(topText, bottomText);
+}
+
+function localTextEnhancement(topText, bottomText) {
+    const enhancements = [
+        // Make text more meme-like
+        (text) => {
+            if (!text) return '';
+            let enhanced = text.toUpperCase();
+            
+            // Add emphasis for short texts
+            if (enhanced.length < 20) {
+                if (!enhanced.endsWith('!') && !enhanced.endsWith('?') && !enhanced.endsWith('.')) {
+                    enhanced += '!';
+                }
+            }
+            
+            // Add common meme phrases
+            const memePhrases = [
+                ' WHEN', ' EVERYWHERE', ' ALWAYS', ' NEVER', ' LITERALLY',
+                ' 100%', ' FOR REAL', ' THOUGH', ' TBH', ' I CAN\'T'
+            ];
+            
+            // Randomly add a meme phrase (30% chance)
+            if (Math.random() > 0.7 && enhanced.length < 50) {
+                const phrase = memePhrases[Math.floor(Math.random() * memePhrases.length)];
+                enhanced += phrase;
+            }
+            
+            return enhanced;
+        },
+        
+        // Add humor elements
+        (text) => {
+            if (!text) return '';
+            let humorous = text;
+            
+            // Replace boring words with funnier alternatives
+            const replacements = {
+                'GOOD': ['GREAT', 'AMAZING', 'EPIC', 'LEGENDARY'],
+                'BAD': ['TERRIBLE', 'AWFUL', 'HORRIBLE', 'DISASTROUS'],
+                'HAPPY': ['EXCITED', 'THRILLED', 'OVERJOYED', 'ECSTATIC'],
+                'SAD': ['DEVASTATED', 'HEARTBROKEN', 'DEPRESSED', 'MISERABLE'],
+                'BIG': ['HUGE', 'ENORMOUS', 'MASSIVE', 'GIGANTIC'],
+                'SMALL': ['TINY', 'MINUSCULE', 'MICROSCOPIC', 'PETITE']
+            };
+            
+            Object.keys(replacements).forEach(word => {
+                if (humorous.includes(word)) {
+                    const alternatives = replacements[word];
+                    humorous = humorous.replace(
+                        new RegExp(word, 'g'), 
+                        alternatives[Math.floor(Math.random() * alternatives.length)]
+                    );
+                }
+            });
+            
+            return humorous;
+        }
+    ];
+    
+    // Apply enhancements with higher probability for shorter texts
+    const applyToTop = topText && topText.length > 0;
+    const applyToBottom = bottomText && bottomText.length > 0;
+    
+    let improvedTop = topText;
+    let improvedBottom = bottomText;
+    
+    if (applyToTop) {
+        enhancements.forEach(enhance => {
+            if (Math.random() > 0.3) { // 70% chance to apply each enhancement
+                improvedTop = enhance(improvedTop);
+            }
+        });
+    }
+    
+    if (applyToBottom) {
+        enhancements.forEach(enhance => {
+            if (Math.random() > 0.3) { // 70% chance to apply each enhancement
+                improvedBottom = enhance(improvedBottom);
+            }
+        });
+    }
+    
+    return {
+        top: improvedTop,
+        bottom: improvedBottom
+    };
 }
 
 function getFallbackCaption(templateName, position) {
