@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Meme Generator Pro</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-robot"></i> AI Meme Generator Pro</h1>
+            <p class="subtitle">Generate memes from templates, upload your own images, and get AI-powered captions!</p>
+        </header>
+
+        <main>
+            <!-- Mode Selector -->
+            <div class="mode-selector">
+                <button id="templatesModeBtn" class="mode-btn active">
+                    <i class="fas fa-th"></i> Templates
+                </button>
+                <button id="uploadModeBtn" class="mode-btn">
+                    <i class="fas fa-cloud-upload-alt"></i> Upload Image
+                </button>
+                <button id="refreshTemplatesBtn" class="mode-btn refresh-btn">
+                    <i class="fas fa-sync-alt"></i> New Templates
+                </button>
+            </div>
+
+            <!-- Templates Section -->
+            <section class="templates-section" id="templatesSection">
+                <h2><i class="fas fa-th"></i> Popular Meme Templates</h2>
+                <div class="templates-grid" id="templatesGrid">
+                    <div class="loading">
+                        <i class="fas fa-spinner fa-spin"></i> Loading meme templates...
+                    </div>
+                </div>
+            </section>
+
+            <!-- Upload Section -->
+            <section class="upload-section" id="uploadSection" style="display: none;">
+                <h2><i class="fas fa-cloud-upload-alt"></i> Upload Your Image</h2>
+                <div class="upload-area" id="uploadArea">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <p>Drag & drop your image here, or click to browse</p>
+                    <p class="upload-note">Supports JPG, PNG, GIF up to 5MB</p>
+                    <input type="file" id="imageUpload" accept="image/*" style="display: none;">
+                    <button id="browseBtn" class="btn btn-upload">
+                        <i class="fas fa-folder-open"></i> Browse Files
+                    </button>
+                </div>
+                <div class="uploaded-image-preview" id="uploadedPreview" style="display: none;">
+                    <img id="uploadedImage" src="" alt="Uploaded image">
+                    <button id="useUploadedBtn" class="btn btn-primary">
+                        <i class="fas fa-magic"></i> Use This Image for Meme
+                    </button>
+                </div>
+            </section>
+
+            <!-- Editor Section -->
+            <section class="editor-section" id="editorSection" style="display: none;">
+                <h2><i class="fas fa-edit"></i> Meme Editor</h2>
+                
+                <div class="editor-header">
+                    <div class="source-info" id="sourceInfo">
+                        <i class="fas fa-info-circle"></i> Editing: <span id="editingSource"></span>
+                    </div>
+                </div>
+                
+                <div class="editor-container">
+                    <div class="preview-area">
+                        <div class="canvas-wrapper">
+                            <canvas id="memeCanvas"></canvas> <!-- Removed fixed width/height; set in JS -->
+                            <div class="canvas-overlay" id="canvasOverlay">
+                                <div class="text-top" id="topTextOverlay"></div>
+                                <div class="text-bottom" id="bottomTextOverlay"></div>
+                            </div>
+                        </div>
+                        <div class="canvas-controls">
+                            <button id="downloadBtn" class="btn btn-download">
+                                <i class="fas fa-download"></i> Download Meme
+                            </button>
+                            <button id="shareBtn" class="btn btn-share">
+                                <i class="fas fa-share-alt"></i> Share
+                            </button>
+                            <button id="resetBtn" class="btn btn-secondary">
+                                <i class="fas fa-redo"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="controls-area">
+                        <!-- Text Controls -->
+                        <div class="control-group">
+                            <h3><i class="fas fa-font"></i> Text Controls</h3>
+                            
+                            <div class="form-group">
+                                <label for="topText">
+                                    <i class="fas fa-arrow-up"></i> Top Text
+                                </label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="topText" placeholder="Enter top text">
+                                    <button id="generateTopBtn" class="btn-icon" title="Generate with AI">
+                                        <i class="fas fa-robot"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="bottomText">
+                                    <i class="fas fa-arrow-down"></i> Bottom Text
+                                </label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="bottomText" placeholder="Enter bottom text">
+                                    <button id="generateBottomBtn" class="btn-icon" title="Generate with AI">
+                                        <i class="fas fa-robot"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Style Controls -->
+                        <div class="control-group">
+                            <h3><i class="fas fa-paint-brush"></i> Style Controls</h3>
+                            
+                            <div class="form-group-inline">
+                                <div class="form-control">
+                                    <label for="fontSize">
+                                        <i class="fas fa-text-height"></i> Font Size
+                                    </label>
+                                    <input type="range" id="fontSize" min="20" max="80" value="42">
+                                    <span id="fontSizeValue">42px</span>
+                                </div>
+                                
+                                <div class="form-control">
+                                    <label for="fontFamily">
+                                        <i class="fas fa-font"></i> Font
+                                    </label>
+                                    <select id="fontFamily">
+                                        <option value="Impact">Impact</option>
+                                        <option value="Arial Black">Arial Black</option>
+                                        <option value="Comic Sans MS">Comic Sans</option>
+                                        <option value="Georgia">Georgia</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group-inline">
+                                <div class="form-control">
+                                    <label for="textColor">
+                                        <i class="fas fa-fill-drip"></i> Text Color
+                                    </label>
+                                    <input type="color" id="textColor" value="#ffffff">
+                                </div>
+                                
+                                <div class="form-control">
+                                    <label for="strokeColor">
+                                        <i class="fas fa-border-style"></i> Stroke Color
+                                    </label>
+                                    <input type="color" id="strokeColor" value="#000000">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="strokeWidth">
+                                    <i class="fas fa-border-all"></i> Stroke Width
+                                </label>
+                                <input type="range" id="strokeWidth" min="1" max="10" value="3">
+                                <span id="strokeWidthValue">3px</span>
+                            </div>
+                        </div>
+
+                        <!-- AI Controls -->
+                        <div class="control-group ai-controls">
+                            <h3><i class="fas fa-robot"></i> AI Assistant</h3>
+                            <p class="control-description">Generate funny captions with AI</p>
+                            
+                            <div class="ai-buttons">
+                                <button id="generateBothBtn" class="btn btn-ai">
+                                    <i class="fas fa-magic"></i> Generate Both Texts
+                                </button>
+                                <button id="suggestThemesBtn" class="btn btn-secondary">
+                                    <i class="fas fa-lightbulb"></i> Suggest Themes
+                                </button>
+                                <button id="improveTextBtn" class="btn btn-secondary">
+                                    <i class="fas fa-wand-magic-sparkles"></i> Improve Current
+                                </button>
+                            </div>
+                            
+                            <div class="ai-status" id="aiStatus">
+                                <i class="fas fa-circle"></i> AI Ready
+                            </div>
+                        </div>
+
+                        <!-- Image Controls -->
+                        <div class="control-group" id="imageControls" style="display: none;">
+                            <h3><i class="fas fa-image"></i> Image Controls</h3>
+                            <button id="replaceImageBtn" class="btn btn-secondary">
+                                <i class="fas fa-exchange-alt"></i> Replace Image
+                            </button>
+                            <button id="adjustBrightnessBtn" class="btn btn-secondary">
+                                <i class="fas fa-sun"></i> Adjust Brightness
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Powered by Imgflip API & Google Gemini AI</p>
+            <p class="footer-note">
+                <i class="fas fa-sync-alt"></i> Templates refresh on reload | 
+                <i class="fas fa-cloud-upload-alt"></i> Upload your own images |
+                <i class="fas fa-robot"></i> AI text generator optimized
+            </p>
+        </footer>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Theme Suggestions Modal -->
+    <div id="themesModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-lightbulb"></i> Suggested Themes</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="themes-grid" id="themesGrid">
+                    <!-- Themes will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="recommendations.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
