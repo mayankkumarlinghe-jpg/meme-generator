@@ -2,7 +2,7 @@
 
 // Configuration
 const AI_CONFIG = {
-    apiEndpoint: '/api/index',
+
     fallbackMode: true,
     cacheEnabled: true,
     requestDelay: 1000, // Delay between requests to avoid rate limiting
