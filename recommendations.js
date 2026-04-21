@@ -97,3 +97,102 @@ class AIGenerator {
 
         return analysis;
     }
+    smartFallback(analysis, position, context) {
+        const captions = {
+            comparison: {
+                top:    ['WHEN YOU HAVE ACTUAL WORK TO DO', 'THE PLAN', 'EXPECTATIONS', 'MY BUDGET'],
+                bottom: ['VS WATCHING YOUTUBE FOR 4 HOURS', 'WHAT ACTUALLY HAPPENS', 'REALITY', 'WHAT I SPENT']
+            },
+            distraction: {
+                top:    ['MY RESPONSIBILITIES', 'THE DEADLINE', 'HEALTHY SLEEP SCHEDULE'],
+                bottom: ['ONE MORE MEME SCROLL', 'JUST FIVE MORE MINUTES', 'ANOTHER EPISODE AT 2AM']
+            },
+            choice: {
+                top:    ['OPTION A: BE PRODUCTIVE', 'FINISH THE PROJECT', 'GO TO THE GYM'],
+                bottom: ['OPTION B: CHAOTIC NAPS', 'WATCH EVERYTHING BURN', 'LAY IN BED THINKING ABOUT GYM']
+            },
+            evolution: {
+                top:    ['SMALL BRAIN: WORRYING', 'ROOKIE MODE: PANIC', 'LEVEL 1: STRESSED'],
+                bottom: ['GALAXY BRAIN: WORRYING ABOUT WORRYING', 'GOD MODE: NOT CARING', 'FINAL FORM: UNBOTHERED']
+            },
+            debate: {
+                top:    ['THE MEETING COULD HAVE BEEN AN EMAIL', 'PINEAPPLE BELONGS ON PIZZA'],
+                bottom: ['CHANGE MY MIND', 'FIGHT ME']
+            },
+            crisis: {
+                top:    ['EVERYTHING IS FINE', 'NO PROBLEMS HERE'],
+                bottom: ['MEANWHILE EVERYTHING IS ON FIRE', 'PROCEEDS TO PANIC INTERNALLY']
+            },
+            argument: {
+                top:    ['ME EXPLAINING WHY I AM RIGHT', 'MY BRAIN AT 3AM'],
+                bottom: ['MY BRAIN KNOWING I AM WRONG', 'BRINGING UP THINGS FROM 2017']
+            },
+            political: {
+                top:    ['I AM ONCE AGAIN ASKING'],
+                bottom: ['FOR THINGS TO MAKE SENSE']
+            },
+            gaming: {
+                top:    ['DRAW 25 CARDS', 'TAKE THE LOSS'],
+                bottom: ['OR ADMIT YOU WERE WRONG', 'OR KEEP PRETENDING YOU ARE FINE']
+            },
+            generic: {
+                top:    ['WHEN THE PLAN WORKS', 'ME EXPLAINING TO MY MOM', 'HOW I LOOK', 'SOCIETY'],
+                bottom: ['AND NOBODY NOTICES', 'WHY I AM BROKE', 'VS HOW I FEEL', 'ME']
+            }
+        };
+
+        if (context) {
+            const contextual = this.contextualFallback(analysis, position, context);
+            if (contextual) return contextual;
+        }
+
+        const type    = captions[analysis.type] ? analysis.type : 'generic';
+        const options = captions[type][position] || captions.generic[position];
+        return options[Math.floor(Math.random() * options.length)];
+    }
+
+    contextualFallback(analysis, position, context) {
+        const ctx = context.toLowerCase();
+        const map = {
+            work:    { top: ['STARTING A NEW PROJECT', 'MY TO-DO LIST'],          bottom: ['3 HOURS OF MEETINGS LATER', 'WHAT I ACTUALLY DID'] },
+            school:  { top: ['STUDYING ALL NIGHT',     'THE SYLLABUS'],           bottom: ['FORGETTING EVERYTHING', 'WHAT WAS ACTUALLY ON THE EXAM'] },
+            gaming:  { top: ['JUST ONE MORE GAME',     'MY TEAMMATES'],           bottom: ['6 HOURS LATER', 'WHEN WE LOSE'] },
+            food:    { top: ['MY MEAL PREP GOALS',     'WHAT I PLANNED TO COOK'], bottom: ['ORDERING PIZZA AGAIN', 'INSTANT NOODLES'] },
+            fitness: { top: ['GOING TO THE GYM',       'NEW YEAR RESOLUTION'],    bottom: ['ONCE IN JANUARY', 'FEBRUARY ME'] }
+        };
+        for (const [k, v] of Object.entries(map)) {
+            if (ctx.includes(k)) {
+                const opts = v[position];
+                return opts[Math.floor(Math.random() * opts.length)];
+            }
+        }
+        return null;
+    }
+
+    async getAIThemes(templateName) {
+        // Try API first, fall back to predefined
+        try {
+            const res = await fetch('/api/get-themes', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ templateName })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.themes?.length) return data.themes;
+            }
+        } catch { /* fallthrough */ }
+        return getPredefinedThemes();
+    }
+
+    cacheKey(templateName, position, context) {
+        return `${templateName}||${position}||${context || 'default'}`;
+    }
+
+    addToCache(key, value) {
+        if (aiCache.size >= AI_CONFIG.maxCacheSize) {
+            aiCache.delete(aiCache.keys().next().value);
+        }
+        aiCache.set(key, value);
+    }
+
