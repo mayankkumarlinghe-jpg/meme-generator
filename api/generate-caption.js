@@ -1,46 +1,45 @@
-const GEMINI_RETRY_ATTEMPTS = 3;
-const GEMINI_RETRY_BASE_MS  = 1500;
+const OPENAI_RETRY_ATTEMPTS = 3;
+const OPENAI_RETRY_BASE_MS  = 1500;
 
-async function callGemini(apiKey, prompt) {
-    for (let attempt = 0; attempt <= GEMINI_RETRY_ATTEMPTS; attempt++) {
-
-        const response = await fetch(
-            "https://api.openai.com/v1/chat/completions",
-            {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`, // SAME variable
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "user", content: prompt }
-                    ],
-                    temperature: 0.9,
-                    max_tokens: 80
-                })
-            }
-        );
-
-        // ✅ success
-        if (response.ok) return response;
-
-        // 🔁 retry on rate/server errors
-        if ([429, 500, 503].includes(response.status)) {
-            if (attempt === GEMINI_RETRY_ATTEMPTS) return response;
-
-            const waitMs = GEMINI_RETRY_BASE_MS * Math.pow(2, attempt);
-
-            console.warn(
-                `Retry ${attempt + 1}/${GEMINI_RETRY_ATTEMPTS} — waiting ${waitMs/1000}s`
+async function callOpenAI(apiKey, prompt) {
+    for (let attempt = 0; attempt <= OPENAI_RETRY_ATTEMPTS; attempt++) {
+        try {
+            const response = await fetch(
+                "https://api.openai.com/v1/chat/completions",
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: "gpt-4o-mini",
+                        messages: [{ role: "user", content: prompt }],
+                        temperature: 0.9,
+                        max_tokens: 80
+                    })
+                }
             );
 
-            await new Promise(r => setTimeout(r, waitMs));
-            continue;
-        }
+            if (response.ok) return response;
 
-        return response;
+            if ([429, 500, 503].includes(response.status)) {
+                if (attempt === OPENAI_RETRY_ATTEMPTS) return response;
+                const waitMs = OPENAI_RETRY_BASE_MS * Math.pow(2, attempt);
+                console.warn(`Retry ${attempt + 1}/${OPENAI_RETRY_ATTEMPTS} — waiting ${waitMs / 1000}s`);
+                await new Promise(r => setTimeout(r, waitMs));
+                continue;
+            }
+
+            return response;
+
+        } catch (err) {
+            // Network error — retry karo
+            if (attempt === OPENAI_RETRY_ATTEMPTS) throw err;
+            const waitMs = OPENAI_RETRY_BASE_MS * Math.pow(2, attempt);
+            console.warn(`Network error on attempt ${attempt + 1}: ${err.message} — retrying in ${waitMs / 1000}s`);
+            await new Promise(r => setTimeout(r, waitMs));
+        }
     }
 }
 
@@ -58,28 +57,27 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Missing templateName or position' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY; // SAME NAME
+    // ✅ IMPORTANT: Vercel dashboard pe env var ka naam yahi hona chahiye
+    const apiKey = process.env.OPENAI_API_KEY;
+
     if (!apiKey) {
-        console.error('GEMINI_API_KEY not set');
+        console.error('OPENAI_API_KEY not set in environment variables');
         return res.status(500).json({ success: false, error: 'API key not configured' });
     }
 
     const positionLabel = position === 'top' ? 'TOP (first line)' : 'BOTTOM (punchline)';
 
     const prompt = `You are a professional meme caption writer. Generate a funny, relatable ${positionLabel} caption for the "${templateName}" meme.
-
 Context/theme: ${context || 'general internet humor'}
-
 Rules:
 - Maximum 10 words
 - All UPPERCASE
 - Make it punchy and funny
-- Return ONLY the caption text
-
+- Return ONLY the caption text, nothing else
 Caption:`;
 
     try {
-        const response = await callGemini(apiKey, prompt);
+        const response = await callOpenAI(apiKey, prompt);
 
         if (response.status === 429) {
             res.setHeader('Retry-After', '20');
@@ -88,28 +86,25 @@ Caption:`;
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
-            console.error('API error:', response.status, err);
+            console.error('OpenAI API error:', response.status, err);
             return res.status(response.status).json({ success: false, error: `API error: ${response.status}` });
         }
 
         const data = await response.json();
-
-        // 🔥 OpenAI parsing
         const raw = data.choices?.[0]?.message?.content ?? '';
-
         const caption = raw
             .trim()
             .replace(/^["']|["']$/g, '')
             .toUpperCase();
 
         if (!caption) {
-            return res.status(500).json({ success: false, error: 'Empty response' });
+            return res.status(500).json({ success: false, error: 'Empty response from API' });
         }
 
         return res.status(200).json({ success: true, caption });
 
     } catch (err) {
-        console.error('handler error:', err);
+        console.error('Handler error:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 }
