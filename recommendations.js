@@ -3,7 +3,9 @@ const AI_CONFIG = {
     cacheEnabled:  true,
     requestDelay:  1500,
     maxCacheSize:  120,
-    fetchTimeout:  12000
+    fetchTimeout:  12000,
+    maxRetries:    4,
+    retryBaseMs:   2000
 };
 
 const aiCache        = new Map();
@@ -19,7 +21,9 @@ class AIGenerator {
 
     async generateCaption(templateName, position, context = null) {
         const key = this.cacheKey(templateName, position, context);
-        if (AI_CONFIG.cacheEnabled && aiCache.has(key)) return aiCache.get(key);
+        if (AI_CONFIG.cacheEnabled && aiCache.has(key)) {
+            return aiCache.get(key).value;
+        }
 
         return new Promise((resolve, reject) => {
             requestQueue.push({ templateName, position, context, resolve, reject });
@@ -28,49 +32,90 @@ class AIGenerator {
     }
 
     async processQueue() {
-        if (isProcessingQueue || requestQueue.length === 0) return;
+        if (isProcessingQueue) return;
         isProcessingQueue = true;
 
         while (requestQueue.length > 0) {
-            const { templateName, position, context, resolve, reject } = requestQueue.shift();
-            await this.rateLimit();
+            const job = requestQueue.shift();
+
             try {
-                this.requestCount++;
+                await this.rateLimit();
                 this.lastRequestTime = Date.now();
-                const caption = await this.fetchCaption(templateName, position, context);
-                const key = this.cacheKey(templateName, position, context);
+
+                const caption = await this.fetchCaption(
+                    job.templateName,
+                    job.position,
+                    job.context
+                );
+
+                const key = this.cacheKey(job.templateName, job.position, job.context);
                 this.addToCache(key, caption);
-                resolve(caption);
+                job.resolve(caption);
+
             } catch (err) {
-                reject(err);
+                job.reject(err);
             }
         }
+
         isProcessingQueue = false;
+
+        if (requestQueue.length > 0) {
+            this.processQueue();
+        }
     }
 
     /* ── Vercel serverless route ── */
     async fetchCaption(templateName, position, context) {
-        const controller = new AbortController();
-        const timeout    = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
+        for (let attempt = 0; attempt <= AI_CONFIG.maxRetries; attempt++) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
 
-        try {
-            const res = await fetch('/api/generate-caption', {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ templateName, position, context: context || 'general internet humor' }),
-                signal:  controller.signal
-            });
-            clearTimeout(timeout);
+            try {
+                const res = await fetch('/api/generate-caption', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ templateName, position, context: context || 'general internet humor' }),
+                    signal:  controller.signal
+                });
+                clearTimeout(timeout);
 
-            if (!res.ok) throw new Error(`API ${res.status}`);
-            const data = await res.json();
-            if (!data.caption) throw new Error('Empty caption');
-            return data.caption;
-        } catch (err) {
-            clearTimeout(timeout);
-            console.warn('Caption API failed, using fallback:', err.message);
-            return this.smartFallback(this.analyzeTemplate(templateName), position, context);
+                if (res.status === 429) {
+                    if (attempt === AI_CONFIG.maxRetries) {
+                        console.warn('Rate limit hit — max retries exhausted, using fallback');
+                        break;
+                    }
+                    const retryAfter = res.headers.get('Retry-After');
+                    const waitMs = retryAfter
+                        ? parseFloat(retryAfter) * 1000
+                        : AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+
+                    console.warn(`429 rate limit — waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${AI_CONFIG.maxRetries}`);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    continue;
+                }
+
+                if (!res.ok) throw new Error(`API ${res.status}`);
+                const data = await res.json();
+                if (!data.caption) throw new Error('Empty caption');
+                return data.caption;
+
+            } catch (err) {
+                clearTimeout(timeout);
+                if (err.name === 'AbortError') {
+                    console.warn('Caption API timed out — using fallback');
+                } else if (attempt < AI_CONFIG.maxRetries && !err.message.startsWith('API ')) {
+                    const waitMs = AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+                    console.warn(`Network error (${err.message}) — retrying in ${waitMs / 1000}s`);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    continue;
+                } else {
+                    console.warn('Caption API failed, using fallback:', err.message);
+                }
+                break;
+            }
         }
+
+        return this.smartFallback(this.analyzeTemplate(templateName), position, context);
     }
 
     /* ── Template analysis for smart fallback ── */
@@ -78,21 +123,21 @@ class AIGenerator {
         const n = name.toLowerCase();
         const analysis = { type: 'generic', mood: 'neutral' };
 
-        if (n.includes('drake'))                            analysis.type = 'comparison';
+        if (n.includes('drake'))                                    analysis.type = 'comparison';
         else if (n.includes('distract') || n.includes('boyfriend')) analysis.type = 'distraction';
-        else if (n.includes('button'))                      analysis.type = 'choice';
-        else if (n.includes('brain') || n.includes('expand')) analysis.type = 'evolution';
-        else if (n.includes('bernie'))                      analysis.type = 'political';
-        else if (n.includes('uno'))                         analysis.type = 'gaming';
-        else if (n.includes('buff')  || n.includes('doge')) analysis.type = 'comparison';
-        else if (n.includes('exit')  || n.includes('ramp')) analysis.type = 'choice';
-        else if (n.includes('balloon'))                     analysis.type = 'distraction';
-        else if (n.includes('change my mind'))              analysis.type = 'debate';
-        else if (n.includes('disaster') || n.includes('fine')) analysis.type = 'crisis';
-        else if (n.includes('woman')  || n.includes('yell')) analysis.type = 'argument';
-        else if (n.includes('this is fine'))                analysis.type = 'crisis';
+        else if (n.includes('button'))                              analysis.type = 'choice';
+        else if (n.includes('brain') || n.includes('expand'))       analysis.type = 'evolution';
+        else if (n.includes('bernie'))                              analysis.type = 'political';
+        else if (n.includes('uno'))                                 analysis.type = 'gaming';
+        else if (n.includes('buff')  || n.includes('doge'))         analysis.type = 'comparison';
+        else if (n.includes('exit')  || n.includes('ramp'))         analysis.type = 'choice';
+        else if (n.includes('balloon'))                             analysis.type = 'distraction';
+        else if (n.includes('change my mind'))                      analysis.type = 'debate';
+        else if (n.includes('disaster') || n.includes('fine'))      analysis.type = 'crisis';
+        else if (n.includes('woman')  || n.includes('yell'))        analysis.type = 'argument';
+        else if (n.includes('this is fine'))                        analysis.type = 'crisis';
 
-        if (n.includes('sad') || n.includes('cry')) analysis.mood = 'sad';
+        if (n.includes('sad') || n.includes('cry'))   analysis.mood = 'sad';
         if (n.includes('angry') || n.includes('mad')) analysis.mood = 'angry';
 
         return analysis;
@@ -171,7 +216,6 @@ class AIGenerator {
     }
 
     async getAIThemes(templateName) {
-        // Try API first, fall back to predefined
         try {
             const res = await fetch('/api/get-themes', {
                 method:  'POST',
@@ -194,7 +238,7 @@ class AIGenerator {
         if (aiCache.size >= AI_CONFIG.maxCacheSize) {
             aiCache.delete(aiCache.keys().next().value);
         }
-        aiCache.set(key, value);
+        aiCache.set(key, { value, time: Date.now() });
     }
 
     async rateLimit() {
