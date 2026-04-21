@@ -96,7 +96,9 @@ header {
     border-radius: 100px;
     font-size: .75rem;
     font-weight: 700;
-text-transform: uppercase;
+    color: var(--purple);
+    letter-spacing: .08em;
+    text-transform: uppercase;
     margin-bottom: 20px;
 }
 
@@ -346,7 +348,7 @@ header h1 {
 
 .drag-indicator {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
- background: rgba(0,0,0,.7);
+    background: rgba(0,0,0,.7);
     border: 1px solid rgba(255,255,255,.2);
     border-radius: var(--radius-sm);
     padding: 8px 14px;
@@ -696,5 +698,43 @@ footer strong { color: var(--text-2); }
 }
 .footer-pills span {
     display: inline-flex; align-items: center; gap: 6px;
-    color: var(--purple);
-    letter-spacing: .08em;
+    padding: 4px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 100px; font-size: .78rem; color: var(--text-2);
+}
+.footer-pills span i { color: var(--purple); font-size: .7rem; }
+
+/* ─── Scrollbar ──────────────────────────────── */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #0a0d16; }
+::-webkit-scrollbar-thumb { background: #1e2a3a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2a3a50; }
+
+/* ─── Responsive ─────────────────────────────── */
+@media (max-width: 1024px) {
+    .editor-container { grid-template-columns: 1fr; }
+    .preview-area { max-width: 600px; margin: 0 auto; width: 100%; }
+}
+
+@media (max-width: 768px) {
+    body { padding: 12px; }
+    header { padding: 36px 20px 32px; }
+    header h1 { font-size: 1.9rem; gap: 10px; }
+    .logo-icon { width: 48px; height: 48px; font-size: 1.3rem; }
+    .mode-selector { padding: 16px; gap: 8px; }
+    .templates-section, .upload-section, .editor-section { padding: 24px 16px; }
+    .templates-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .template-card img { height: 150px; }
+    .form-group-inline, .color-row { grid-template-columns: 1fr; }
+    .canvas-controls { gap: 8px; }
+    .canvas-controls .btn { padding: 10px 14px; font-size: .82rem; }
+    footer { padding: 20px 16px; }
+}
+
+@media (max-width: 480px) {
+    .ai-btn-row { flex-direction: column; }
+    .themes-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ─── Utility ────────────────────────────────── */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border-width: 0; }
