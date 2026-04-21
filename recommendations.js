@@ -1,111 +1,339 @@
-const RETRY_ATTEMPTS = 3;
-const RETRY_BASE_MS  = 1500;
+/* ─── AI Config ────────────────────────────────── */
+const AI_CONFIG = {
+    cacheEnabled:  true,
+    requestDelay:  1500,
+    maxCacheSize:  120,
+    fetchTimeout:  20000,
+    maxRetries:    4,
+    retryBaseMs:   2000
+};
 
-async function callGroq(apiKey, prompt) {
-    for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt++) {
-        try {
-            const response = await fetch(
-                "https://api.groq.com/openai/v1/chat/completions",
-                {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`,
-                        "Content-Type":  "application/json"
-                    },
-                    body: JSON.stringify({
-                        model:       "llama3-8b-8192",
-                        messages:    [{ role: "user", content: prompt }],
-                        max_tokens:  80,
-                        temperature: 0.9
-                    })
-                }
-            );
+const aiCache        = new Map();
+const requestQueue   = [];
+let isProcessingQueue = false;
 
-            if (response.ok) return response;
+/* ─── AIGenerator Class ────────────────────────── */
+class AIGenerator {
+    constructor() {
+        this.requestCount    = 0;
+        this.lastRequestTime = 0;
+    }
 
-            if ([429, 500, 503].includes(response.status)) {
-                if (attempt === RETRY_ATTEMPTS) return response;
-                const waitMs = RETRY_BASE_MS * Math.pow(2, attempt);
-                console.warn(`Retry ${attempt + 1}/${RETRY_ATTEMPTS} — waiting ${waitMs / 1000}s`);
-                await new Promise(r => setTimeout(r, waitMs));
-                continue;
+    async generateCaption(templateName, position, context = null) {
+        const key = this.cacheKey(templateName, position, context);
+        if (AI_CONFIG.cacheEnabled && aiCache.has(key)) {
+            return aiCache.get(key).value;
+        }
+
+        return new Promise((resolve, reject) => {
+            requestQueue.push({ templateName, position, context, resolve, reject });
+            this.processQueue();
+        });
+    }
+
+    async processQueue() {
+        if (isProcessingQueue) return;
+        isProcessingQueue = true;
+
+        while (requestQueue.length > 0) {
+            const job = requestQueue.shift();
+            try {
+                await this.rateLimit();
+                this.lastRequestTime = Date.now();
+
+                const caption = await this.fetchCaption(
+                    job.templateName,
+                    job.position,
+                    job.context
+                );
+
+                const key = this.cacheKey(job.templateName, job.position, job.context);
+                this.addToCache(key, caption);
+                job.resolve(caption);
+
+            } catch (err) {
+                job.reject(err);
             }
+        }
 
-            return response;
+        isProcessingQueue = false;
 
-        } catch (err) {
-            if (attempt === RETRY_ATTEMPTS) throw err;
-            const waitMs = RETRY_BASE_MS * Math.pow(2, attempt);
-            console.warn(`Network error attempt ${attempt + 1}: ${err.message} — retrying in ${waitMs / 1000}s`);
-            await new Promise(r => setTimeout(r, waitMs));
+        if (requestQueue.length > 0) {
+            this.processQueue();
+        }
+    }
+
+    async fetchCaption(templateName, position, context) {
+        for (let attempt = 0; attempt <= AI_CONFIG.maxRetries; attempt++) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout); // ✅ Fixed
+
+            try {
+                const res = await fetch('/api/generate-caption', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({
+                        templateName,
+                        position,
+                        context: context || 'general internet humor'
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeout); // ✅ Fixed
+
+                if (res.status === 429) {
+                    clearTimeout(timeout);
+                    if (attempt === AI_CONFIG.maxRetries) {
+                        console.warn('Rate limit — max retries exhausted, using fallback');
+                        break;
+                    }
+                    const retryAfter = res.headers.get('Retry-After');
+                    const waitMs = retryAfter
+                        ? parseFloat(retryAfter) * 1000
+                        : AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+                    console.warn(`429 — waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${AI_CONFIG.maxRetries}`);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    continue;
+                }
+
+                if (!res.ok) throw new Error(`API ${res.status}`);
+
+                const data = await res.json();
+                if (!data.caption) throw new Error('Empty caption');
+                return data.caption;
+
+            } catch (err) {
+                clearTimeout(timeout); // ✅ Fixed
+
+                if (err.name === 'AbortError') {
+                    console.warn('Caption API timed out — using fallback');
+                } else if (attempt < AI_CONFIG.maxRetries && !err.message.startsWith('API ')) {
+                    const waitMs = AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+                    console.warn(`Network error (${err.message}) — retrying in ${waitMs / 1000}s`);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    continue;
+                } else {
+                    console.warn('Caption API failed:', err.message);
+                }
+                break;
+            }
+        }
+
+        return this.smartFallback(this.analyzeTemplate(templateName), position, context);
+    }
+
+    analyzeTemplate(name) {
+        const n = name.toLowerCase();
+        const analysis = { type: 'generic', mood: 'neutral' };
+
+        if (n.includes('drake'))                                    analysis.type = 'comparison';
+        else if (n.includes('distract') || n.includes('boyfriend')) analysis.type = 'distraction';
+        else if (n.includes('button'))                              analysis.type = 'choice';
+        else if (n.includes('brain') || n.includes('expand'))       analysis.type = 'evolution';
+        else if (n.includes('bernie'))                              analysis.type = 'political';
+        else if (n.includes('uno'))                                 analysis.type = 'gaming';
+        else if (n.includes('buff')  || n.includes('doge'))         analysis.type = 'comparison';
+        else if (n.includes('exit')  || n.includes('ramp'))         analysis.type = 'choice';
+        else if (n.includes('balloon'))                             analysis.type = 'distraction';
+        else if (n.includes('change my mind'))                      analysis.type = 'debate';
+        else if (n.includes('disaster') || n.includes('fine'))      analysis.type = 'crisis';
+        else if (n.includes('woman')  || n.includes('yell'))        analysis.type = 'argument';
+        else if (n.includes('this is fine'))                        analysis.type = 'crisis';
+
+        if (n.includes('sad') || n.includes('cry'))   analysis.mood = 'sad';
+        if (n.includes('angry') || n.includes('mad')) analysis.mood = 'angry';
+
+        return analysis;
+    }
+
+    smartFallback(analysis, position, context) {
+        const captions = {
+            comparison: {
+                top:    ['WHEN YOU HAVE ACTUAL WORK TO DO', 'THE PLAN', 'EXPECTATIONS', 'MY BUDGET'],
+                bottom: ['VS WATCHING YOUTUBE FOR 4 HOURS', 'WHAT ACTUALLY HAPPENS', 'REALITY', 'WHAT I SPENT']
+            },
+            distraction: {
+                top:    ['MY RESPONSIBILITIES', 'THE DEADLINE', 'HEALTHY SLEEP SCHEDULE'],
+                bottom: ['ONE MORE MEME SCROLL', 'JUST FIVE MORE MINUTES', 'ANOTHER EPISODE AT 2AM']
+            },
+            choice: {
+                top:    ['OPTION A: BE PRODUCTIVE', 'FINISH THE PROJECT', 'GO TO THE GYM'],
+                bottom: ['OPTION B: CHAOTIC NAPS', 'WATCH EVERYTHING BURN', 'LAY IN BED THINKING ABOUT GYM']
+            },
+            evolution: {
+                top:    ['SMALL BRAIN: WORRYING', 'ROOKIE MODE: PANIC', 'LEVEL 1: STRESSED'],
+                bottom: ['GALAXY BRAIN: WORRYING ABOUT WORRYING', 'GOD MODE: NOT CARING', 'FINAL FORM: UNBOTHERED']
+            },
+            debate: {
+                top:    ['THE MEETING COULD HAVE BEEN AN EMAIL', 'PINEAPPLE BELONGS ON PIZZA'],
+                bottom: ['CHANGE MY MIND', 'FIGHT ME']
+            },
+            crisis: {
+                top:    ['EVERYTHING IS FINE', 'NO PROBLEMS HERE'],
+                bottom: ['MEANWHILE EVERYTHING IS ON FIRE', 'PROCEEDS TO PANIC INTERNALLY']
+            },
+            argument: {
+                top:    ['ME EXPLAINING WHY I AM RIGHT', 'MY BRAIN AT 3AM'],
+                bottom: ['MY BRAIN KNOWING I AM WRONG', 'BRINGING UP THINGS FROM 2017']
+            },
+            political: {
+                top:    ['I AM ONCE AGAIN ASKING'],
+                bottom: ['FOR THINGS TO MAKE SENSE']
+            },
+            gaming: {
+                top:    ['DRAW 25 CARDS', 'TAKE THE LOSS'],
+                bottom: ['OR ADMIT YOU WERE WRONG', 'OR KEEP PRETENDING YOU ARE FINE']
+            },
+            generic: {
+                top:    ['WHEN THE PLAN WORKS', 'ME EXPLAINING TO MY MOM', 'HOW I LOOK', 'SOCIETY'],
+                bottom: ['AND NOBODY NOTICES', 'WHY I AM BROKE', 'VS HOW I FEEL', 'ME']
+            }
+        };
+
+        if (context) {
+            const contextual = this.contextualFallback(analysis, position, context);
+            if (contextual) return contextual;
+        }
+
+        const type    = captions[analysis.type] ? analysis.type : 'generic';
+        const options = captions[type][position] || captions.generic[position];
+        return options[Math.floor(Math.random() * options.length)];
+    }
+
+    contextualFallback(analysis, position, context) {
+        const ctx = context.toLowerCase();
+        const map = {
+            work:    { top: ['STARTING A NEW PROJECT', 'MY TO-DO LIST'],          bottom: ['3 HOURS OF MEETINGS LATER', 'WHAT I ACTUALLY DID'] },
+            school:  { top: ['STUDYING ALL NIGHT',     'THE SYLLABUS'],           bottom: ['FORGETTING EVERYTHING', 'WHAT WAS ACTUALLY ON THE EXAM'] },
+            gaming:  { top: ['JUST ONE MORE GAME',     'MY TEAMMATES'],           bottom: ['6 HOURS LATER', 'WHEN WE LOSE'] },
+            food:    { top: ['MY MEAL PREP GOALS',     'WHAT I PLANNED TO COOK'], bottom: ['ORDERING PIZZA AGAIN', 'INSTANT NOODLES'] },
+            fitness: { top: ['GOING TO THE GYM',       'NEW YEAR RESOLUTION'],    bottom: ['ONCE IN JANUARY', 'FEBRUARY ME'] }
+        };
+        for (const [k, v] of Object.entries(map)) {
+            if (ctx.includes(k)) {
+                const opts = v[position];
+                return opts[Math.floor(Math.random() * opts.length)];
+            }
+        }
+        return null;
+    }
+
+    async getAIThemes(templateName) {
+        try {
+            const res = await fetch('/api/get-themes', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ templateName })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.themes?.length) return data.themes;
+            }
+        } catch { /* fallthrough */ }
+        return getPredefinedThemes();
+    }
+
+    cacheKey(templateName, position, context) {
+        return `${templateName}||${position}||${context || 'default'}`;
+    }
+
+    addToCache(key, value) {
+        if (aiCache.size >= AI_CONFIG.maxCacheSize) {
+            aiCache.delete(aiCache.keys().next().value);
+        }
+        aiCache.set(key, { value, time: Date.now() });
+    }
+
+    async rateLimit() {
+        const elapsed = Date.now() - this.lastRequestTime;
+        if (elapsed < AI_CONFIG.requestDelay) {
+            await new Promise(r => setTimeout(r, AI_CONFIG.requestDelay - elapsed));
         }
     }
 }
 
-export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Origin',  '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+/* ─── Singleton ────────────────────────────────── */
+const aiGenerator = new AIGenerator();
 
-    if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
+/* ─── Public API ───────────────────────────────── */
+async function getAICaption(templateName, position, context = null) {
+    return aiGenerator.generateCaption(templateName, position, context);
+}
 
-    const { templateName, position, context } = req.body || {};
+async function getAIThemes(templateName) {
+    return aiGenerator.getAIThemes(templateName);
+}
 
-    if (!templateName || !position) {
-        return res.status(400).json({ success: false, error: 'Missing templateName or position' });
-    }
-
-    // ✅ Vercel pe GROQ_API_KEY naam se add karna
-    const apiKey = process.env.GROQ_API_KEY;
-
-    if (!apiKey) {
-        console.error('GROQ_API_KEY not set in environment variables');
-        return res.status(500).json({ success: false, error: 'API key not configured' });
-    }
-
-    const positionLabel = position === 'top' ? 'TOP (first line)' : 'BOTTOM (punchline)';
-
-    const prompt = `You are a professional meme caption writer. Generate a funny, relatable ${positionLabel} caption for the "${templateName}" meme.
-Context/theme: ${context || 'general internet humor'}
-Rules:
-- Maximum 10 words
-- All UPPERCASE
-- Make it punchy and funny
-- Return ONLY the caption text, nothing else, no quotes
-Caption:`;
+async function improveTextWithAI(topText, bottomText) {
+    if (!topText && !bottomText) return { top: topText, bottom: bottomText };
 
     try {
-        const response = await callGroq(apiKey, prompt);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout); // ✅ Fixed
 
-        if (response.status === 429) {
-            res.setHeader('Retry-After', '20');
-            return res.status(429).json({ success: false, error: 'Rate limit — retry later' });
+        const res = await fetch('/api/improve-text', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ topText, bottomText, context: 'meme humor' }),
+            signal:  controller.signal
+        });
+        clearTimeout(timeoutId); // ✅ Fixed
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.improvedTop || data.improvedBottom) {
+                return { top: data.improvedTop || topText, bottom: data.improvedBottom || bottomText };
+            }
         }
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            console.error('Groq API error:', response.status, err);
-            return res.status(response.status).json({ success: false, error: `API error: ${response.status}` });
-        }
-
-        const data = await response.json();
-
-        // ✅ Groq — OpenAI jaisa response format
-        const raw = data.choices?.[0]?.message?.content ?? '';
-        const caption = raw
-            .trim()
-            .replace(/^["']|["']$/g, '')
-            .toUpperCase();
-
-        if (!caption) {
-            return res.status(500).json({ success: false, error: 'Empty response from API' });
-        }
-
-        return res.status(200).json({ success: true, caption });
-
     } catch (err) {
-        console.error('Handler error:', err);
-        return res.status(500).json({ success: false, error: err.message });
+        console.warn('improve-text API failed:', err.message);
     }
+
+    return localTextEnhancement(topText, bottomText);
 }
+
+function localTextEnhancement(topText, bottomText) {
+    const replacements = {
+        GOOD:  ['GREAT', 'AMAZING', 'EPIC', 'LEGENDARY'],
+        BAD:   ['TERRIBLE', 'AWFUL', 'DISASTROUS'],
+        HAPPY: ['ECSTATIC', 'THRILLED', 'OVERJOYED'],
+        SAD:   ['DEVASTATED', 'HEARTBROKEN'],
+        BIG:   ['ENORMOUS', 'MASSIVE', 'COLOSSAL'],
+        SMALL: ['TINY', 'MINUSCULE', 'MICROSCOPIC']
+    };
+
+    const enhance = text => {
+        if (!text) return '';
+        let s = text.toUpperCase();
+        for (const [word, alts] of Object.entries(replacements)) {
+            if (s.includes(word)) {
+                s = s.replace(new RegExp(word, 'g'), alts[Math.floor(Math.random() * alts.length)]);
+            }
+        }
+        if (!s.endsWith('!') && !s.endsWith('?') && s.length < 50 && Math.random() > .5) s += '!';
+        return s;
+    };
+
+    return { top: enhance(topText), bottom: enhance(bottomText) };
+}
+
+function getFallbackCaption(templateName, position) {
+    return aiGenerator.smartFallback(aiGenerator.analyzeTemplate(templateName), position, null);
+}
+
+function getPredefinedThemes() {
+    return [
+        { name: '🖥️ Tech Life',    description: 'Developer struggles',  topText: 'WHEN THE CODE FINALLY COMPILES',   bottomText: 'AND IMMEDIATELY BREAKS IN PROD'      },
+        { name: '😴 Monday Mood',  description: 'Start of week energy', topText: 'MONDAY 8AM: FULL OF MOTIVATION',   bottomText: 'MONDAY 8:05AM: BACK IN BED'          },
+        { name: '📱 Social Media', description: 'Online vs reality',    topText: 'MY INSTAGRAM',                     bottomText: 'MY ACTUAL LIFE'                      },
+        { name: '🎮 Gamer Life',   description: 'Gaming rage',          topText: 'ME LOADING INTO THE GAME',         bottomText: 'ME AFTER THE FIRST LOSS'             },
+        { name: '📚 Student Life', description: 'Academic suffering',   topText: 'STUDYING THE NIGHT BEFORE',        bottomText: 'FORGETTING EVERYTHING AT THE EXAM'   },
+        { name: '💼 Work Life',    description: 'Office culture',       topText: 'THE EMAIL COULD HAVE BEEN A CALL', bottomText: 'THE CALL COULD HAVE BEEN AN EMAIL'   },
+        { name: '💰 Money',        description: 'Financial chaos',      topText: 'MY SAVINGS ACCOUNT',               bottomText: 'ONE COFFEE AND A VIBE'               },
+        { name: '😴 Sleep',        description: 'Sleep deprivation',    topText: 'GOING TO SLEEP EARLY TONIGHT',     bottomText: 'IT IS 3AM AND I AM WATCHING VIDEOS'  },
+        { name: '🏋️ Fitness',     description: 'Gym procrastination',  topText: 'NEW YEAR NEW ME',                  bottomText: 'FEBRUARY: BACK TO SNACKS'            },
+        { name: '🍕 Food',         description: 'Eating habits',        topText: 'MEAL PREP SUNDAY',                 bottomText: 'ORDERING PIZZA WEDNESDAY'            },
+    ];
+}
+
+console.log('✦ AI Meme Generator — recommendations.js loaded');
