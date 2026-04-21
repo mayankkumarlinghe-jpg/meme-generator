@@ -198,4 +198,301 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Preset colour buttons
         document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                textColorPicker.value   = btn.dataset.text;
+                strokeColorPicker.value = btn.dataset.stroke;
+                redraw();
+            });
+        });
 
+        // Canvas drag events
+        setupCanvasDrag();
+    }
+
+    /* ─── Canvas Drag-to-Reposition Text ───────────── */
+    function setupCanvasDrag() {
+        memeCanvas.addEventListener('mousedown',  onDragStart);
+        memeCanvas.addEventListener('mousemove',  onDragMove);
+        memeCanvas.addEventListener('mouseup',    onDragEnd);
+        memeCanvas.addEventListener('mouseleave', onDragEnd);
+
+        // Touch support
+        memeCanvas.addEventListener('touchstart', e => { e.preventDefault(); onDragStart(e.touches[0]); }, { passive: false });
+        memeCanvas.addEventListener('touchmove',  e => { e.preventDefault(); onDragMove(e.touches[0]); }, { passive: false });
+        memeCanvas.addEventListener('touchend',   e => { e.preventDefault(); onDragEnd(); }, { passive: false });
+    }
+
+    function getCanvasPoint(clientX, clientY) {
+        const rect = memeCanvas.getBoundingClientRect();
+        const scaleX = memeCanvas.width  / rect.width;
+        const scaleY = memeCanvas.height / rect.height;
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top)  * scaleY
+        };
+    }
+
+    function hitTest(point, obj) {
+        if (!obj.bounds) return false;
+        const b = obj.bounds;
+        return point.x >= b.left && point.x <= b.right &&
+               point.y >= b.top  && point.y <= b.bottom;
+    }
+
+    function onDragStart(e) {
+        if (!currentTemplate) return;
+        const pt = getCanvasPoint(e.clientX, e.clientY);
+        for (const key of ['top', 'bottom']) {
+            const obj = textObjects[key];
+            if (hitTest(pt, obj)) {
+                obj.dragging = true;
+                activeTextKey = key;
+                const cx = obj.x * memeCanvas.width;
+                const cy = obj.y * memeCanvas.height;
+                obj.dragOffsetX = pt.x - cx;
+                obj.dragOffsetY = pt.y - cy;
+                canvasWrapper.classList.add('dragging');
+                break;
+            }
+        }
+    }
+
+    function onDragMove(e) {
+        if (!currentTemplate) return;
+        const pt = getCanvasPoint(e.clientX, e.clientY);
+
+        // Cursor feedback when hovering a text region
+        let hovering = false;
+        for (const key of ['top', 'bottom']) {
+            if (hitTest(pt, textObjects[key])) { hovering = true; break; }
+        }
+        canvasWrapper.classList.toggle('drag-hover', hovering && !activeTextKey);
+
+        if (!activeTextKey) return;
+        const obj = textObjects[activeTextKey];
+        if (!obj.dragging) return;
+
+        // Move, clamp within canvas bounds
+        obj.x = Math.max(0, Math.min(1, (pt.x - obj.dragOffsetX) / memeCanvas.width));
+        obj.y = Math.max(0, Math.min(1, (pt.y - obj.dragOffsetY) / memeCanvas.height));
+        redraw();
+    }
+
+    function onDragEnd() {
+        if (activeTextKey) {
+            textObjects[activeTextKey].dragging = false;
+        }
+        activeTextKey = null;
+        canvasWrapper.classList.remove('dragging');
+    }
+
+    function resetTextPositions() {
+        textObjects.top.x    = 0.5;
+        textObjects.top.y    = 0.10;
+        textObjects.bottom.x = 0.5;
+        textObjects.bottom.y = 0.90;
+        redraw();
+        showToast('Text positions reset', 'info');
+    }
+
+    /* ─── Canvas Drawing ───────────────────────────── */
+    function redraw() {
+        if (!currentTemplate || !memeImage.complete) return;
+
+        ctx.clearRect(0, 0, memeCanvas.width, memeCanvas.height);
+        ctx.drawImage(memeImage, 0, 0, memeCanvas.width, memeCanvas.height);
+
+        const fontSize   = parseInt(fontSizeSlider.value);
+        const fontFamily = fontFamilySelect.value;
+        const textColor  = textColorPicker.value;
+        const strokeColor= strokeColorPicker.value;
+        const strokeW    = parseInt(strokeWidthSlider.value);
+
+        ctx.font        = `bold ${fontSize}px "${fontFamily}", Impact, Arial Black, sans-serif`;
+        ctx.lineJoin    = 'round';
+        ctx.miterLimit  = 2;
+        ctx.textBaseline= 'middle';
+        ctx.textAlign   = textAlign;
+
+        const topText    = topTextInput.value.trim().toUpperCase();
+        const bottomText = bottomTextInput.value.trim().toUpperCase();
+
+        drawTextObject(textObjects.top,    topText,    fontSize, textColor, strokeColor, strokeW);
+        drawTextObject(textObjects.bottom, bottomText, fontSize, textColor, strokeColor, strokeW);
+    }
+
+    function drawTextObject(obj, text, fontSize, textColor, strokeColor, strokeW) {
+        if (!text) { obj.bounds = null; return; }
+
+        const x = obj.x * memeCanvas.width;
+        const y = obj.y * memeCanvas.height;
+        const maxW = memeCanvas.width * 0.92;
+
+        const lines = wrapText(ctx, text, maxW);
+        const lineH = fontSize * 1.25;
+        const totalH = lines.length * lineH;
+        const startY = y - (totalH / 2) + lineH / 2;
+
+        // Compute anchor x based on alignment
+        let anchorX = x;
+        if (textAlign === 'left')  anchorX = x;
+        if (textAlign === 'right') anchorX = x;
+
+        // Draw selection ring if dragging
+        if (obj.dragging) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(34,211,238,0.9)';
+            ctx.lineWidth   = 2;
+            ctx.setLineDash([5, 4]);
+            const pad = 10;
+            const maxLineW = Math.max(...lines.map(l => ctx.measureText(l).width));
+            let boxX = anchorX - maxLineW / 2 - pad;
+            if (textAlign === 'left')  boxX = anchorX - pad;
+            if (textAlign === 'right') boxX = anchorX - maxLineW - pad;
+            ctx.strokeRect(boxX, startY - lineH / 2 - pad, maxLineW + pad * 2, totalH + pad * 2);
+            ctx.restore();
+        }
+
+        // Draw text lines
+        lines.forEach((line, i) => {
+            const ly = startY + i * lineH;
+
+            if (strokeW > 0) {
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth   = strokeW * 2;
+                ctx.strokeText(line, anchorX, ly, memeCanvas.width);
+            }
+            ctx.fillStyle = textColor;
+            ctx.fillText(line, anchorX, ly, memeCanvas.width);
+        });
+
+        // Update hit bounds
+        const measuredMaxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+        const pad = 14;
+        let bLeft = anchorX - measuredMaxW / 2 - pad;
+        if (textAlign === 'left')  bLeft = anchorX - pad;
+        if (textAlign === 'right') bLeft = anchorX - measuredMaxW - pad;
+
+        obj.bounds = {
+            left:   bLeft,
+            right:  bLeft + measuredMaxW + pad * 2,
+            top:    startY - lineH / 2 - pad,
+            bottom: startY + totalH - lineH / 2 + pad
+        };
+    }
+
+    function wrapText(context, text, maxW) {
+        const words = text.split(' ');
+        const lines = [];
+        let current = '';
+        for (const word of words) {
+            const test = current ? current + ' ' + word : word;
+            if (context.measureText(test).width <= maxW) {
+                current = test;
+            } else {
+                if (current) lines.push(current);
+                current = word;
+            }
+        }
+        if (current) lines.push(current);
+        return lines.length ? lines : [''];
+    }
+
+    /* ─── Template / Upload Selection ─────────────── */
+    function selectTemplate(template) {
+        memeImage = new Image();
+        memeImage.crossOrigin = 'anonymous';
+        memeImage.src = template.url;
+        memeImage.onload = () => {
+            setCanvasDimensions();
+            currentTemplate = template;
+            aiCache.clear();
+            editingSource.textContent = template.name;
+            resetTextPositions();
+            switchToEditor();
+            redraw();
+        };
+        memeImage.onerror = () => showToast('Could not load template image', 'error');
+    }
+
+    function useUploadedImage() {
+        if (!uploadedFile) return;
+        memeImage = new Image();
+        memeImage.src = URL.createObjectURL(uploadedFile);
+        memeImage.onload = () => {
+            setCanvasDimensions();
+            currentTemplate = { name: 'Custom Upload', uploaded: true };
+            aiCache.clear();
+            editingSource.textContent = 'Uploaded Image';
+            resetTextPositions();
+            switchToEditor();
+            redraw();
+        };
+        memeImage.onerror = () => showToast('Error loading image', 'error');
+    }
+
+    function setCanvasDimensions() {
+        const maxW = 640;
+        const ratio = memeImage.height / memeImage.width;
+        memeCanvas.width  = maxW;
+        memeCanvas.height = Math.round(maxW * ratio);
+    }
+
+    /* ─── Mode Switching ───────────────────────────── */
+    function switchMode(mode) {
+        currentMode = mode;
+        templatesModeBtn.classList.toggle('active', mode === 'templates');
+        uploadModeBtn.classList.toggle('active',    mode === 'upload');
+        templatesSection.style.display = mode === 'templates' ? 'block' : 'none';
+        uploadSection.style.display    = mode === 'upload'    ? 'block' : 'none';
+        editorSection.style.display    = 'none';
+    }
+
+    function switchToEditor() {
+        templatesSection.style.display = 'none';
+        uploadSection.style.display    = 'none';
+        editorSection.style.display    = 'block';
+        document.getElementById('imageControls').style.display =
+            currentTemplate?.uploaded ? 'block' : 'none';
+    }
+
+    /* ─── File Upload ──────────────────────────────── */
+    function setupDragAndDrop() {
+        ['dragenter','dragover','dragleave','drop'].forEach(ev => {
+            const uploadArea = document.getElementById('uploadArea');
+            uploadArea.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+            document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
+        });
+        const ua = document.getElementById('uploadArea');
+        ua.addEventListener('dragenter', () => ua.classList.add('dragover'));
+        ua.addEventListener('dragleave', () => ua.classList.remove('dragover'));
+        ua.addEventListener('drop', e => { ua.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+        ua.addEventListener('click', () => imageUpload.click());
+    }
+
+    function handleFiles(files) {
+        if (!files.length) return;
+        const file = files[0];
+        if (!file.type.match('image.*')) return showToast('Please upload an image file', 'error');
+        if (file.size > 5 * 1024 * 1024) return showToast('File too large (max 5MB)', 'error');
+        uploadedFile = file;
+        const reader = new FileReader();
+        reader.onload = e => {
+            uploadedImage.src = e.target.result;
+            uploadedPreview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function handleImageUpload(e) { handleFiles(e.target.files); }
+
+    /* ─── AI Caption Generation ────────────────────── */
+    async function generateAIText(position) {
+        if (!currentTemplate) return showToast('Select an image first', 'error');
+        if (aiRequestCount >= MAX_AI_REQUESTS) return showToast('AI limit reached. Refresh to reset.', 'warning');
+
+        const cacheKey = `${currentTemplate.name}-${position}`;
+        if (aiCache.has(cacheKey)) {
+            setTextInput(position, aiCache.get(cacheKey));
+            return showToast('Using cached suggestion', 'info');
+        }
