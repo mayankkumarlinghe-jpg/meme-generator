@@ -1,18 +1,19 @@
-const GEMINI_RETRY_ATTEMPTS = 4;
-const GEMINI_RETRY_BASE_MS  = 1500; // 1.5s → 3s → 6s → 12s
+const GEMINI_RETRY_ATTEMPTS = 3;
+const GEMINI_RETRY_BASE_MS  = 1500;
 
 async function callGemini(apiKey, prompt) {
     for (let attempt = 0; attempt <= GEMINI_RETRY_ATTEMPTS; attempt++) {
+
         const response = await fetch(
-            "https://api.groq.com/openai/v1/chat/completions",
+            "https://api.openai.com/v1/chat/completions",
             {
-                method: 'POST',
+                method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`, // SAME variable
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    model: "llama3-8b-8192",
+                    model: "gpt-4o-mini",
                     messages: [
                         { role: "user", content: prompt }
                     ],
@@ -22,17 +23,17 @@ async function callGemini(apiKey, prompt) {
             }
         );
 
-        // Success
+        // ✅ success
         if (response.ok) return response;
 
-        // Retry on 429 / 500 / 503
+        // 🔁 retry on rate/server errors
         if ([429, 500, 503].includes(response.status)) {
             if (attempt === GEMINI_RETRY_ATTEMPTS) return response;
 
             const waitMs = GEMINI_RETRY_BASE_MS * Math.pow(2, attempt);
 
             console.warn(
-                `API retry ${attempt + 1}/${GEMINI_RETRY_ATTEMPTS} — waiting ${waitMs / 1000}s`
+                `Retry ${attempt + 1}/${GEMINI_RETRY_ATTEMPTS} — waiting ${waitMs/1000}s`
             );
 
             await new Promise(r => setTimeout(r, waitMs));
@@ -73,8 +74,7 @@ Rules:
 - Maximum 10 words
 - All UPPERCASE
 - Make it punchy and funny
-- Match the template's typical use case
-- Return ONLY the caption text — no quotes, no explanations
+- Return ONLY the caption text
 
 Caption:`;
 
@@ -82,7 +82,7 @@ Caption:`;
         const response = await callGemini(apiKey, prompt);
 
         if (response.status === 429) {
-            res.setHeader('Retry-After', '30');
+            res.setHeader('Retry-After', '20');
             return res.status(429).json({ success: false, error: 'Rate limit — retry later' });
         }
 
@@ -94,7 +94,7 @@ Caption:`;
 
         const data = await response.json();
 
-        // 🔥 CHANGED PARSING (Groq format)
+        // 🔥 OpenAI parsing
         const raw = data.choices?.[0]?.message?.content ?? '';
 
         const caption = raw
