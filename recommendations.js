@@ -68,7 +68,7 @@ class AIGenerator {
     async fetchCaption(templateName, position, context) {
         for (let attempt = 0; attempt <= AI_CONFIG.maxRetries; attempt++) {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
+           // const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
 
             try {
                 const res = await fetch('/api/generate-caption', {
