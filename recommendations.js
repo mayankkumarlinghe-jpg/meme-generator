@@ -1,7 +1,7 @@
 /* ─── AI Config ────────────────────────────────── */
 const AI_CONFIG = {
     cacheEnabled:  true,
-    requestDelay:  800,
+    requestDelay:  1500,
     maxCacheSize:  120,
     fetchTimeout:  12000
 };
