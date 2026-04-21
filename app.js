@@ -97,3 +97,105 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    /* ─── Template Loading ─────────────────────────── */
+    async function loadTemplates(forceRefresh = false) {
+        templatesGrid.innerHTML = `<div class="loading"><div class="loading-spinner"></div><p>Fetching fresh templates…</p></div>`;
+        try {
+            const url = `https://api.imgflip.com/get_memes${forceRefresh ? '?t=' + Date.now() : ''}`;
+            const res  = await fetch(url);
+            const data = await res.json();
+            if (data.success) {
+                templates = shuffleArray(data.data.memes).slice(0, 30);
+                displayTemplates();
+                const countEl = document.getElementById('templateCount');
+                if (countEl) countEl.textContent = `${templates.length} templates`;
+                showToast(`${templates.length} templates loaded!`, 'info');
+            } else throw new Error('API failed');
+        } catch {
+            showToast('Using offline templates', 'warning');
+            loadFallbackTemplates();
+        }
+    }
+
+    function shuffleArray(arr) {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    function loadFallbackTemplates() {
+        templates = shuffleArray([
+            { id: '181913649', name: 'Drake Hotline Bling',     url: 'https://i.imgflip.com/30b1gx.jpg',  width: 1200, height: 1200 },
+            { id: '87743020',  name: 'Two Buttons',             url: 'https://i.imgflip.com/1g8my4.jpg',  width: 600,  height: 908  },
+            { id: '112126428', name: 'Distracted Boyfriend',    url: 'https://i.imgflip.com/1ur9b0.jpg',  width: 1200, height: 800  },
+            { id: '131087935', name: 'Running Away Balloon',    url: 'https://i.imgflip.com/261o3j.jpg',  width: 761,  height: 1024 },
+            { id: '247375501', name: 'Buff Doge vs Cheems',     url: 'https://i.imgflip.com/43a45p.png',  width: 937,  height: 720  },
+            { id: '129242436', name: 'Change My Mind',          url: 'https://i.imgflip.com/24y43o.jpg',  width: 482,  height: 361  },
+            { id: '222403160', name: 'Bernie I Am Once Again',  url: 'https://i.imgflip.com/3pnzk9.jpg',  width: 750,  height: 750  },
+            { id: '124822590', name: 'Left Exit 12 Off Ramp',   url: 'https://i.imgflip.com/22bdq6.jpg',  width: 804,  height: 767  },
+            { id: '217743513', name: 'UNO Draw 25 Cards',       url: 'https://i.imgflip.com/3lmzyx.jpg',  width: 500,  height: 494  },
+            { id: '93895088',  name: 'Expanding Brain',         url: 'https://i.imgflip.com/1jwhww.jpg',  width: 857,  height: 1202 },
+        ]);
+        displayTemplates();
+    }
+
+    function displayTemplates() {
+        templatesGrid.innerHTML = '';
+        templates.forEach(t => {
+            const card = document.createElement('div');
+            card.className = 'template-card';
+            card.innerHTML = `<img src="${t.url}" alt="${t.name}" loading="lazy"><div class="template-name">${t.name}</div>`;
+            card.addEventListener('click', () => selectTemplate(t));
+            templatesGrid.appendChild(card);
+        });
+    }
+
+    /* ─── Event Listeners ──────────────────────────── */
+    function setupEventListeners() {
+        templatesModeBtn.addEventListener('click', () => switchMode('templates'));
+        uploadModeBtn.addEventListener('click',    () => switchMode('upload'));
+        refreshTemplatesBtn.addEventListener('click', () => loadTemplates(true));
+
+        browseBtn.addEventListener('click',       () => imageUpload.click());
+        imageUpload.addEventListener('change',    handleImageUpload);
+        useUploadedBtn.addEventListener('click',  useUploadedImage);
+
+        topTextInput.addEventListener('input',    redraw);
+        bottomTextInput.addEventListener('input', redraw);
+        fontFamilySelect.addEventListener('change', redraw);
+        textColorPicker.addEventListener('input',   redraw);
+        strokeColorPicker.addEventListener('input',  redraw);
+        fontSizeSlider.addEventListener('input',  () => { fontSizeValue.textContent = `${fontSizeSlider.value}px`; redraw(); });
+        strokeWidthSlider.addEventListener('input',() => { strokeWidthValue.textContent = `${strokeWidthSlider.value}px`; redraw(); });
+
+        generateTopBtn.addEventListener('click',  () => generateAIText('top'));
+        generateBottomBtn.addEventListener('click',() => generateAIText('bottom'));
+        generateBothBtn.addEventListener('click', generateBothAITexts);
+        suggestThemesBtn.addEventListener('click', showThemeSuggestions);
+        improveTextBtn.addEventListener('click',  improveCurrentText);
+
+        downloadBtn.addEventListener('click',     downloadMeme);
+        shareBtn.addEventListener('click',        shareMeme);
+        resetBtn.addEventListener('click',        resetEditor);
+        resetPositionsBtn.addEventListener('click', resetTextPositions);
+        replaceImageBtn.addEventListener('click', () => switchMode('upload'));
+
+        closeModalBtn.addEventListener('click',   () => themesModal.classList.remove('active'));
+        themesModal.addEventListener('click', e => { if (e.target === themesModal) themesModal.classList.remove('active'); });
+
+        // Alignment buttons
+        document.querySelectorAll('.align-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.align-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                textAlign = btn.dataset.align;
+                redraw();
+            });
+        });
+
+        // Preset colour buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+
