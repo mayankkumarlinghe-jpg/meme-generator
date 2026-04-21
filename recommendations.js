@@ -65,59 +65,60 @@ class AIGenerator {
     }
 
     /* ── Vercel serverless route ── */
-    async fetchCaption(templateName, position, context) {
-        for (let attempt = 0; attempt <= AI_CONFIG.maxRetries; attempt++) {
-            const controller = new AbortController();
-           // const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
 
-            try {
-                const res = await fetch('/api/generate-caption', {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ templateName, position, context: context || 'general internet humor' }),
-                    signal:  controller.signal
-                });
-                clearTimeout(timeout);
+async fetchCaption(templateName, position, context) {
+    for (let attempt = 0; attempt <= AI_CONFIG.maxRetries; attempt++) {
+        const controller = new AbortController();
 
-                if (res.status === 429) {
-                    if (attempt === AI_CONFIG.maxRetries) {
-                        console.warn('Rate limit hit — max retries exhausted, using fallback');
-                        break;
-                    }
-                    const retryAfter = res.headers.get('Retry-After');
-                    const waitMs = retryAfter
-                        ? parseFloat(retryAfter) * 1000
-                        : AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+               const timeout = setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
 
-                    console.warn(`429 rate limit — waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${AI_CONFIG.maxRetries}`);
-                    await new Promise(r => setTimeout(r, waitMs));
-                    continue;
+        try {
+            const res = await fetch('/api/generate-caption', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ templateName, position, context: context || 'general internet humor' }),
+                signal:  controller.signal
+            });
+            clearTimeout(timeout); 
+
+            if (res.status === 429) {
+                clearTimeout(timeout); 
+                if (attempt === AI_CONFIG.maxRetries) {
+                    console.warn('Rate limit — max retries exhausted, using fallback');
+                    break;
                 }
-
-                if (!res.ok) throw new Error(`API ${res.status}`);
-                const data = await res.json();
-                if (!data.caption) throw new Error('Empty caption');
-                return data.caption;
-
-            } catch (err) {
-                clearTimeout(timeout);
-                if (err.name === 'AbortError') {
-                    console.warn('Caption API timed out — using fallback');
-                } else if (attempt < AI_CONFIG.maxRetries && !err.message.startsWith('API ')) {
-                    const waitMs = AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
-                    console.warn(`Network error (${err.message}) — retrying in ${waitMs / 1000}s`);
-                    await new Promise(r => setTimeout(r, waitMs));
-                    continue;
-                } else {
-                    console.warn('Caption API failed, using fallback:', err.message);
-                }
-                break;
+                const retryAfter = res.headers.get('Retry-After');
+                const waitMs = retryAfter
+                    ? parseFloat(retryAfter) * 1000
+                    : AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+                console.warn(`429 — waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${AI_CONFIG.maxRetries}`);
+                await new Promise(r => setTimeout(r, waitMs));
+                continue;
             }
-        }
 
-        return this.smartFallback(this.analyzeTemplate(templateName), position, context);
+            if (!res.ok) throw new Error(`API ${res.status}`);
+            const data = await res.json();
+            if (!data.caption) throw new Error('Empty caption');
+            return data.caption;
+
+        } catch (err) {
+            clearTimeout(timeout); // ✅ Yahan bhi ab kaam karega
+            if (err.name === 'AbortError') {
+                console.warn('Caption API timed out — using fallback');
+            } else if (attempt < AI_CONFIG.maxRetries && !err.message.startsWith('API ')) {
+                const waitMs = AI_CONFIG.retryBaseMs * Math.pow(2, attempt);
+                console.warn(`Network error (${err.message}) — retrying in ${waitMs / 1000}s`);
+                await new Promise(r => setTimeout(r, waitMs));
+                continue;
+            } else {
+                console.warn('Caption API failed:', err.message);
+            }
+            break;
+        }
     }
 
+    return this.smartFallback(this.analyzeTemplate(templateName), position, context);
+}
     /* ── Template analysis for smart fallback ── */
     analyzeTemplate(name) {
         const n = name.toLowerCase();
