@@ -1,6 +1,5 @@
 const GEMINI_RETRY_ATTEMPTS = 4;
 const GEMINI_RETRY_BASE_MS  = 1500; // 1.5s → 3s → 6s → 12s
-console.log("ENV CHECK:", process.env.GEMINI_API_KEY);
 async function callGemini(apiKey, prompt) {
     for (let attempt = 0; attempt <= GEMINI_RETRY_ATTEMPTS; attempt++) {
         const response = await fetch(
