@@ -496,6 +496,7 @@ document.addEventListener('DOMContentLoaded', function () {
             setTextInput(position, aiCache.get(cacheKey));
             return showToast('Using cached suggestion', 'info');
         }
+
         updateAIStatus('Generating…', 'warning');
         showToast(`Generating ${position} text…`, 'info');
 
@@ -702,4 +703,31 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-                          
+    /* ─── Reset ────────────────────────────────────── */
+    function resetEditor() {
+        topTextInput.value    = '';
+        bottomTextInput.value = '';
+        fontSizeSlider.value  = 42;
+        fontSizeValue.textContent = '42px';
+        strokeWidthSlider.value = 3;
+        strokeWidthValue.textContent = '3px';
+        textColorPicker.value  = '#ffffff';
+        strokeColorPicker.value= '#000000';
+        fontFamilySelect.value = 'Impact';
+        textAlign = 'center';
+        document.querySelectorAll('.align-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.align-btn[data-align="center"]').classList.add('active');
+        resetTextPositions();
+        showToast('Editor reset', 'info');
+    }
+
+    /* ─── Toast ────────────────────────────────────── */
+    function showToast(msg, type = 'info') {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className   = `toast ${type}`;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+});
