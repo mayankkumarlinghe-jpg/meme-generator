@@ -97,6 +97,7 @@ class AIGenerator {
 
         return analysis;
     }
+
     smartFallback(analysis, position, context) {
         const captions = {
             comparison: {
@@ -196,3 +197,95 @@ class AIGenerator {
         aiCache.set(key, value);
     }
 
+    async rateLimit() {
+        const elapsed = Date.now() - this.lastRequestTime;
+        if (elapsed < AI_CONFIG.requestDelay) {
+            await new Promise(r => setTimeout(r, AI_CONFIG.requestDelay - elapsed));
+        }
+    }
+}
+
+/* ─── Singleton ────────────────────────────────── */
+const aiGenerator = new AIGenerator();
+
+/* ─── Public API ───────────────────────────────── */
+async function getAICaption(templateName, position, context = null) {
+    return aiGenerator.generateCaption(templateName, position, context);
+}
+
+async function getAIThemes(templateName) {
+    return aiGenerator.getAIThemes(templateName);
+}
+
+async function improveTextWithAI(topText, bottomText) {
+    if (!topText && !bottomText) return { top: topText, bottom: bottomText };
+
+    try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), AI_CONFIG.fetchTimeout);
+
+        const res = await fetch('/api/improve-text', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ topText, bottomText, context: 'meme humor' }),
+            signal:  controller.signal
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.improvedTop || data.improvedBottom) {
+                return { top: data.improvedTop || topText, bottom: data.improvedBottom || bottomText };
+            }
+        }
+    } catch (err) {
+        console.warn('improve-text API failed:', err.message);
+    }
+
+    return localTextEnhancement(topText, bottomText);
+}
+
+function localTextEnhancement(topText, bottomText) {
+    const replacements = {
+        GOOD:  ['GREAT', 'AMAZING', 'EPIC', 'LEGENDARY'],
+        BAD:   ['TERRIBLE', 'AWFUL', 'DISASTROUS'],
+        HAPPY: ['ECSTATIC', 'THRILLED', 'OVERJOYED'],
+        SAD:   ['DEVASTATED', 'HEARTBROKEN'],
+        BIG:   ['ENORMOUS', 'MASSIVE', 'COLOSSAL'],
+        SMALL: ['TINY', 'MINUSCULE', 'MICROSCOPIC']
+    };
+
+    const enhance = text => {
+        if (!text) return '';
+        let s = text.toUpperCase();
+        for (const [word, alts] of Object.entries(replacements)) {
+            if (s.includes(word)) {
+                s = s.replace(new RegExp(word, 'g'), alts[Math.floor(Math.random() * alts.length)]);
+            }
+        }
+        if (!s.endsWith('!') && !s.endsWith('?') && s.length < 50 && Math.random() > .5) s += '!';
+        return s;
+    };
+
+    return { top: enhance(topText), bottom: enhance(bottomText) };
+}
+
+function getFallbackCaption(templateName, position) {
+    return aiGenerator.smartFallback(aiGenerator.analyzeTemplate(templateName), position, null);
+}
+
+function getPredefinedThemes() {
+    return [
+        { name: '🖥️ Tech Life',    description: 'Developer struggles',     topText: 'WHEN THE CODE FINALLY COMPILES',   bottomText: 'AND IMMEDIATELY BREAKS IN PROD'       },
+        { name: '😴 Monday Mood',  description: 'Start of week energy',     topText: 'MONDAY 8AM: FULL OF MOTIVATION',   bottomText: 'MONDAY 8:05AM: BACK IN BED'           },
+        { name: '📱 Social Media', description: 'Online vs reality',        topText: 'MY INSTAGRAM',                     bottomText: 'MY ACTUAL LIFE'                       },
+        { name: '🎮 Gamer Life',   description: 'Gaming rage',              topText: 'ME LOADING INTO THE GAME',         bottomText: 'ME AFTER THE FIRST LOSS'             },
+        { name: '📚 Student Life', description: 'Academic suffering',       topText: 'STUDYING THE NIGHT BEFORE',        bottomText: 'FORGETTING EVERYTHING AT THE EXAM'   },
+        { name: '💼 Work Life',    description: 'Office culture',           topText: 'THE EMAIL COULD HAVE BEEN A CALL', bottomText: 'THE CALL COULD HAVE BEEN AN EMAIL'   },
+        { name: '💰 Money',        description: 'Financial chaos',          topText: 'MY SAVINGS ACCOUNT',               bottomText: 'ONE COFFEE AND A VIBE'               },
+        { name: '😴 Sleep',        description: 'Sleep deprivation',        topText: 'GOING TO SLEEP EARLY TONIGHT',     bottomText: 'IT IS 3AM AND I AM WATCHING VIDEOS'  },
+        { name: '🏋️ Fitness',     description: 'Gym procrastination',      topText: 'NEW YEAR NEW ME',                  bottomText: 'FEBRUARY: BACK TO SNACKS'            },
+        { name: '🍕 Food',         description: 'Eating habits',            topText: 'MEAL PREP SUNDAY',                 bottomText: 'ORDERING PIZZA WEDNESDAY'            },
+    ];
+}
+
+console.log('✦ AI Meme Generator — recommendations.js loaded');
