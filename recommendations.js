@@ -3,7 +3,7 @@ const AI_CONFIG = {
     cacheEnabled:  true,
     requestDelay:  1500,
     maxCacheSize:  120,
-    fetchTimeout:  12000,
+    fetchTimeout:  20000,
     maxRetries:    4,
     retryBaseMs:   2000
 };
