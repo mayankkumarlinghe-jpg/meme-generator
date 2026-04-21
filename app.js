@@ -496,3 +496,210 @@ document.addEventListener('DOMContentLoaded', function () {
             setTextInput(position, aiCache.get(cacheKey));
             return showToast('Using cached suggestion', 'info');
         }
+        updateAIStatus('Generating…', 'warning');
+        showToast(`Generating ${position} text…`, 'info');
+
+        try {
+            aiRequestCount++;
+            const text = await getAICaption(currentTemplate.name, position);
+            if (text) {
+                aiCache.set(cacheKey, text);
+                setTextInput(position, text);
+                updateAIStatus();
+                showToast('Caption generated!', 'info');
+            }
+        } catch {
+            aiRequestCount--;
+            updateAIStatus('AI Error', 'error');
+            showToast('AI unavailable, using fallback', 'warning');
+            setTextInput(position, getFallbackCaption(currentTemplate.name, position));
+        }
+    }
+
+    async function generateBothAITexts() {
+        if (!currentTemplate) return showToast('Select an image first', 'error');
+        if (aiRequestCount >= MAX_AI_REQUESTS - 1) return showToast('AI limit reached', 'warning');
+
+        updateAIStatus('Generating both…', 'warning');
+        showToast('Generating captions…', 'info');
+
+        try {
+            const [top, bottom] = await Promise.all([
+                getAICaption(currentTemplate.name, 'top'),
+                getAICaption(currentTemplate.name, 'bottom')
+            ]);
+            if (top)    { topTextInput.value    = top;    aiCache.set(`${currentTemplate.name}-top`,    top); }
+            if (bottom) { bottomTextInput.value = bottom; aiCache.set(`${currentTemplate.name}-bottom`, bottom); }
+            aiRequestCount += 2;
+            redraw();
+            updateAIStatus();
+            showToast('Both captions generated!', 'info');
+        } catch {
+            showToast('Using fallback captions', 'warning');
+            topTextInput.value    = getFallbackCaption(currentTemplate.name, 'top');
+            bottomTextInput.value = getFallbackCaption(currentTemplate.name, 'bottom');
+            redraw();
+            updateAIStatus();
+        }
+    }
+
+    async function showThemeSuggestions() {
+        if (!currentTemplate) return showToast('Select an image first', 'error');
+        showToast('Fetching theme ideas…', 'info');
+        try {
+            const themes = await getAIThemes(currentTemplate.name);
+            populateThemesGrid(themes);
+        } catch {
+            populateThemesGrid(getPredefinedThemes());
+        }
+        themesModal.classList.add('active');
+    }
+
+    function populateThemesGrid(themes) {
+        themesGrid.innerHTML = '';
+        themes.forEach(t => {
+            const card = document.createElement('div');
+            card.className = 'theme-card';
+            card.innerHTML = `<h4>${t.name}</h4><p>${t.description}</p><small>Click to apply →</small>`;
+            card.addEventListener('click', () => {
+                topTextInput.value    = t.topText;
+                bottomTextInput.value = t.bottomText;
+                redraw();
+                themesModal.classList.remove('active');
+                showToast(`Theme "${t.name}" applied`, 'info');
+            });
+            themesGrid.appendChild(card);
+        });
+    }
+
+    async function improveCurrentText() {
+        const top    = topTextInput.value.trim();
+        const bottom = bottomTextInput.value.trim();
+        if (!top && !bottom) return showToast('No text to improve', 'warning');
+
+        updateAIStatus('Improving…', 'warning');
+        showToast('Improving text…', 'info');
+
+        try {
+            const improved = await improveTextWithAI(top, bottom);
+            if (improved.top    && improved.top    !== top)    topTextInput.value    = improved.top;
+            if (improved.bottom && improved.bottom !== bottom) bottomTextInput.value = improved.bottom;
+            redraw();
+            updateAIStatus();
+            showToast('Text improved!', 'info');
+        } catch {
+            showToast('Using local enhancement', 'warning');
+            const enh = localEnhance(top, bottom);
+            if (enh.top)    topTextInput.value    = enh.top;
+            if (enh.bottom) bottomTextInput.value = enh.bottom;
+            redraw();
+            updateAIStatus();
+        }
+    }
+
+    function localEnhance(top, bottom) {
+        const enhance = t => {
+            if (!t) return '';
+            let s = t.toUpperCase();
+            if (!s.endsWith('!') && !s.endsWith('?') && Math.random() > .5) s += '!';
+            if (s.length < 25 && Math.random() > .7) {
+                const opts = ['SERIOUSLY', 'LITERALLY', 'ACTUALLY', 'WAIT—'];
+                s = opts[Math.floor(Math.random() * opts.length)] + ' ' + s;
+            }
+            return s;
+        };
+        return { top: enhance(top), bottom: enhance(bottom) };
+    }
+
+    /* ─── Helpers ──────────────────────────────────── */
+    function setTextInput(position, text) {
+        if (position === 'top') topTextInput.value = text;
+        else bottomTextInput.value = text;
+        redraw();
+    }
+
+    function updateAIStatus(msg = 'AI Ready', type = 'success') {
+        const el = document.getElementById('aiStatus');
+        if (!el) return;
+        const dot = el.querySelector('.status-dot');
+        el.childNodes[el.childNodes.length - 1].textContent = ' ' + msg;
+        if (dot) {
+            dot.style.background = type === 'error'   ? 'var(--red)'   :
+                                   type === 'warning' ? 'var(--amber)' : 'var(--green)';
+            dot.style.boxShadow  = type === 'error'   ? '0 0 8px var(--red)'   :
+                                   type === 'warning' ? '0 0 8px var(--amber)' : '0 0 8px var(--green)';
+        }
+        const remaining = MAX_AI_REQUESTS - aiRequestCount;
+        if (remaining <= 5) {
+            el.childNodes[el.childNodes.length - 1].textContent += ` (${remaining} left)`;
+        }
+    }
+
+    /* ─── Download / Share ─────────────────────────── */
+    function downloadMeme() {
+        if (!currentTemplate) return showToast('Select an image first', 'error');
+
+        // Create a clean canvas without selection UI
+        const tmp = document.createElement('canvas');
+        tmp.width  = memeCanvas.width;
+        tmp.height = memeCanvas.height;
+        const tctx = tmp.getContext('2d');
+
+        tctx.drawImage(memeImage, 0, 0, tmp.width, tmp.height);
+
+        const fontSize   = parseInt(fontSizeSlider.value);
+        const fontFamily = fontFamilySelect.value;
+        const textColor  = textColorPicker.value;
+        const strokeColor= strokeColorPicker.value;
+        const strokeW    = parseInt(strokeWidthSlider.value);
+
+        tctx.font        = `bold ${fontSize}px "${fontFamily}", Impact, Arial Black, sans-serif`;
+        tctx.textBaseline= 'middle';
+        tctx.textAlign   = textAlign;
+        tctx.lineJoin    = 'round';
+        tctx.miterLimit  = 2;
+
+        const draw = (text, obj) => {
+            if (!text) return;
+            const x = obj.x * tmp.width;
+            const y = obj.y * tmp.height;
+            const lines = wrapText(tctx, text.toUpperCase(), tmp.width * 0.92);
+            const lineH = fontSize * 1.25;
+            const startY = y - (lines.length * lineH / 2) + lineH / 2;
+            lines.forEach((line, i) => {
+                const ly = startY + i * lineH;
+                if (strokeW > 0) { tctx.strokeStyle = strokeColor; tctx.lineWidth = strokeW * 2; tctx.strokeText(line, x, ly, tmp.width); }
+                tctx.fillStyle = textColor;
+                tctx.fillText(line, x, ly, tmp.width);
+            });
+        };
+
+        draw(topTextInput.value.trim(),    textObjects.top);
+        draw(bottomTextInput.value.trim(), textObjects.bottom);
+
+        const name = currentTemplate.uploaded ? 'my-meme' : `meme-${currentTemplate.name.replace(/\s+/g, '-').toLowerCase()}`;
+        const link = document.createElement('a');
+        link.download = `${name}-${Date.now()}.png`;
+        link.href = tmp.toDataURL('image/png');
+        link.click();
+        showToast('Meme downloaded!', 'info');
+    }
+
+    function shareMeme() {
+        if (!currentTemplate) return showToast('Select an image first', 'error');
+        memeCanvas.toBlob(blob => {
+            const file = new File([blob], 'meme.png', { type: 'image/png' });
+            if (navigator.share) {
+                navigator.share({ title: 'Check out this meme!', files: [file] })
+                    .catch(() => showToast('Share cancelled', 'info'));
+            } else if (navigator.clipboard?.write) {
+                navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+                    .then(() => showToast('Copied to clipboard!', 'info'))
+                    .catch(() => showToast('Could not copy meme', 'error'));
+            } else {
+                showToast('Sharing not supported in this browser', 'warning');
+            }
+        });
+    }
+
+                          
